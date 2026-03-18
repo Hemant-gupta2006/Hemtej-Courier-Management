@@ -34,6 +34,7 @@ export const Navbar = ({ onToggleSidebar, isSidebarOpen }: NavbarProps) => {
       <Button
         variant="ghost"
         size="icon"
+        onClick={onToggleSidebar}
         className="md:hidden text-slate-700 dark:text-slate-300"
       >
         <Menu className="h-5 w-5" />
