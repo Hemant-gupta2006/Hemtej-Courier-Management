@@ -10,6 +10,7 @@ import {
   SortingState,
   getFilteredRowModel,
 } from "@tanstack/react-table";
+import { useVirtualizer } from "@tanstack/react-virtual";
 
 import {
   Table,
@@ -40,6 +41,10 @@ import { Label } from "@/components/ui/label";
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
+  /** When true, only visible rows are rendered — essential for 100+ rows. */
+  virtualize?: boolean;
+  /** Height of the virtualised scroll container. Default: "560px" */
+  tableHeight?: string;
 }
 
 type ValidationErrors = Record<string, Record<string, string>>;
@@ -135,8 +140,12 @@ const MemoizedRow = React.memo(
 export function DataTable<TData, TValue>({
   columns,
   data: initialData,
+  virtualize = false,
+  tableHeight = "560px",
 }: DataTableProps<TData, TValue>) {
   const router = useRouter();
+  // Ref for the virtualised scroll container (also used in non-virtual mode, harmlessly)
+  const parentRef = React.useRef<HTMLDivElement>(null);
   const [data, setData] = React.useState<any[]>(initialData);
   const [sorting, setSorting] = React.useState<SortingState>([{ id: "srNo", desc: true }]);
   const [globalFilter, setGlobalFilter] = React.useState("");
@@ -640,6 +649,22 @@ export function DataTable<TData, TValue>({
     meta: tableMeta,
   });
 
+  // ── Virtualizer — declared AFTER table so rows is available ──────────────
+  const rows = table.getRowModel().rows;
+  const rowVirtualizer = useVirtualizer({
+    count: virtualize ? rows.length : 0,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 42,
+    overscan: 5,
+  });
+  const virtualItems = rowVirtualizer.getVirtualItems();
+  const totalVirtualSize = rowVirtualizer.getTotalSize();
+  const paddingTop = virtualItems.length > 0 ? (virtualItems[0]?.start ?? 0) : 0;
+  const paddingBottom =
+    virtualItems.length > 0
+      ? totalVirtualSize - (virtualItems[virtualItems.length - 1]?.end ?? 0)
+      : 0;
+
   // ─────────────────────────────────────────────
   // Excel Export
   // ─────────────────────────────────────────────
@@ -850,7 +875,11 @@ export function DataTable<TData, TValue>({
 
       {/* Table */}
       <div className="rounded-[20px] overflow-hidden bg-white/40 dark:bg-slate-900/40 backdrop-blur-3xl border border-white/50 dark:border-white/10 shadow-[0_8px_32px_0_rgba(31,38,135,0.05)]">
-        <div className="overflow-x-auto">
+        <div
+          ref={parentRef}
+          className="overflow-x-auto"
+          style={virtualize ? { height: tableHeight, overflowY: "auto" } : undefined}
+        >
           <Table>
             <TableHeader className="bg-slate-100/50 dark:bg-slate-800/50 sticky top-0 z-10 backdrop-blur-md">
               {table.getHeaderGroups().map((hg) => (
@@ -870,8 +899,34 @@ export function DataTable<TData, TValue>({
               ))}
             </TableHeader>
             <TableBody>
-                {table.getRowModel().rows?.length ? (
-                  table.getRowModel().rows.map((row) => {
+              {rows.length ? (
+                virtualize ? (
+                  // ── Virtualised rows (only in-viewport rows rendered) ──
+                  <>
+                    {paddingTop > 0 && (
+                      <tr><td style={{ height: paddingTop }} colSpan={columns.length + 1} /></tr>
+                    )}
+                    {virtualItems.map((vr) => {
+                      const row = rows[vr.index];
+                      const identifier = row.original.tempId || row.original.id;
+                      return (
+                        <MemoizedRow
+                          key={row.id}
+                          row={row}
+                          rowErrorVersion={rowErrorVersions[identifier] || 0}
+                          errorsRef={errorsRef}
+                          saveNewRow={saveNewRow}
+                          saveEditedRow={saveEditedRow}
+                        />
+                      );
+                    })}
+                    {paddingBottom > 0 && (
+                      <tr><td style={{ height: paddingBottom }} colSpan={columns.length + 1} /></tr>
+                    )}
+                  </>
+                ) : (
+                  // ── Normal rows (used when virtualize=false, e.g. 20-row entry page) ──
+                  rows.map((row) => {
                     const identifier = row.original.tempId || row.original.id;
                     return (
                       <MemoizedRow
@@ -884,16 +939,17 @@ export function DataTable<TData, TValue>({
                       />
                     );
                   })
-                ) : (
-                  <TableRow>
-                    <TableCell
-                      colSpan={columns.length}
-                      className="h-48 text-center text-slate-500"
-                    >
-                      No courier entries found. Try adding a new row.
-                    </TableCell>
-                  </TableRow>
-                )}
+                )
+              ) : (
+                <TableRow>
+                  <TableCell
+                    colSpan={columns.length}
+                    className="h-48 text-center text-slate-500"
+                  >
+                    No courier entries found. Try adding a new row.
+                  </TableCell>
+                </TableRow>
+              )}
             </TableBody>
           </Table>
         </div>

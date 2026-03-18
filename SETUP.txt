@@ -1,0 +1,86 @@
+==============================
+COURIER MANAGEMENT SETUP GUIDE
+==============================
+
+STEP 1: Install Required Software
+--------------------------------
+1. Install Node.js (LTS version)
+   https://nodejs.org
+
+2. Install Git
+   https://git-scm.com
+
+3. Install a code editor (recommended: VS Code)
+
+--------------------------------
+
+STEP 2: Clone the Project
+------------------------
+git clone https://github.com/YOUR_USERNAME/hemtej-courier-management.git
+
+cd hemtej-courier-management
+
+--------------------------------
+
+STEP 3: Install Dependencies
+---------------------------
+npm install
+
+--------------------------------
+
+STEP 4: Setup Environment Variables
+----------------------------------
+Create a `.env` file in root directory:
+
+DATABASE_URL="file:./dev.db"
+
+NEXTAUTH_URL="http://localhost:3000"
+NEXTAUTH_SECRET="your_generated_secret_here"
+
+GOOGLE_CLIENT_ID="your_google_client_id"
+GOOGLE_CLIENT_SECRET="your_google_client_secret"
+
+--------------------------------
+
+STEP 5: Setup Database (Prisma)
+------------------------------
+npx prisma db push
+
+(Optional: open Prisma Studio)
+npx prisma studio
+
+--------------------------------
+
+STEP 6: Run the Project
+----------------------
+npm run dev
+
+Open browser:
+http://localhost:3000
+
+--------------------------------
+
+STEP 7: Common Fixes
+-------------------
+
+If Prisma errors:
+npx prisma generate
+
+If node_modules issue:
+Delete node_modules and run:
+npm install
+
+If port already in use:
+Change port:
+npm run dev -- -p 3001
+
+--------------------------------
+
+STEP 8: Optional (Production Build)
+----------------------------------
+npm run build
+npm start
+
+--------------------------------
+
+PROJECT IS READY 🚀

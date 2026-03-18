@@ -184,24 +184,30 @@ export default function CourierEntryPage() {
           )}
         </div>
 
-        {/* Performance hint */}
-        {!isMobile && entries.length > 20 && (
-          <div className="flex items-center justify-between px-4 py-2 rounded-xl bg-amber-50/80 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 text-sm">
-            <span>
-              Showing latest <strong>20</strong> of <strong>{entries.length}</strong> entries for
-              better typing performance.
-            </span>
-            <button
-              onClick={() => router.push("/dashboard/all-entries")}
-              className="underline underline-offset-2 hover:no-underline font-medium"
-            >
-              View all →
-            </button>
-          </div>
-        )}
 
         {/* Desktop table — receives only 20 rows */}
         {!isMobile && <DataTable columns={columns} data={visibleData} />}
+
+        {/* Footer: subtle info + show-all link */}
+        {!isMobile && (
+          <div className="flex justify-between items-center text-xs text-slate-400 dark:text-slate-500 mt-1">
+            <span>
+              {entries.length > 20
+                ? `Showing latest 20 of ${entries.length} entries for faster typing`
+                : `${entries.length} entries`}
+            </span>
+            {entries.length > 20 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => router.push("/dashboard/all-entries")}
+                className="rounded-xl text-xs h-7 border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-400"
+              >
+                Show All Entries →
+              </Button>
+            )}
+          </div>
+        )}
 
         {/* Mobile: card list + floating form */}
         {isMobile && (
