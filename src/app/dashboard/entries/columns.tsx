@@ -125,8 +125,8 @@ const AutocompleteCell = ({ getValue, row, column, table }: any) => {
           onBlur={onBlur}
           onKeyDown={handleKeyDown}
           className={`h-8 border-transparent bg-transparent px-2 w-full transition-all text-slate-900 dark:text-slate-100 ${error
-              ? "ring-1 ring-inset ring-red-500 border-red-400 focus-visible:ring-red-500"
-              : "hover:border-blue-500/50 focus-visible:ring-2 focus-visible:ring-blue-500"
+            ? "ring-1 ring-inset ring-red-500 border-red-400 focus-visible:ring-red-500"
+            : "hover:border-blue-500/50 focus-visible:ring-2 focus-visible:ring-blue-500"
             }`}
         />
       </div>
@@ -221,8 +221,8 @@ const EditableCell = ({ getValue, row, column, table }: any) => {
         onBlur={onBlur}
         onKeyDown={handleKeyDown}
         className={`h-8 border-transparent bg-transparent px-2 transition-all w-full text-slate-900 dark:text-slate-100 ${error
-            ? "ring-1 ring-inset ring-red-500 border-red-400 focus-visible:ring-red-500"
-            : "hover:border-blue-500/50 focus-visible:ring-2 focus-visible:ring-blue-500"
+          ? "ring-1 ring-inset ring-red-500 border-red-400 focus-visible:ring-red-500"
+          : "hover:border-blue-500/50 focus-visible:ring-2 focus-visible:ring-blue-500"
           }`}
       />
       <FieldError message={error} />
@@ -293,8 +293,8 @@ const WeightCell = ({ getValue, row, column, table }: any) => {
           onKeyDown={handleKeyDown}
           placeholder="0.00"
           className={`h-8 border-transparent bg-transparent px-2 w-full transition-all text-right font-mono text-slate-900 dark:text-slate-100 ${error
-              ? "ring-1 ring-inset ring-red-500 border-red-400 focus-visible:ring-red-500"
-              : "hover:border-blue-500/50 focus-visible:ring-2 focus-visible:ring-blue-500"
+            ? "ring-1 ring-inset ring-red-500 border-red-400 focus-visible:ring-red-500"
+            : "hover:border-blue-500/50 focus-visible:ring-2 focus-visible:ring-blue-500"
             }`}
         />
         <Select

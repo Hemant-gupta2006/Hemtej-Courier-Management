@@ -329,7 +329,7 @@ export default function CourierEntryPage() {
                 <p>Tap the + button below to add your first entry.</p>
               </div>
             ) : (
-              entries.map((entry: any) => (
+              visibleData.map((entry: any) => (
                 <MobileEntryCard key={entry.id} entry={entry} />
               ))
             )}

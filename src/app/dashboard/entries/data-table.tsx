@@ -45,6 +45,12 @@ interface DataTableProps<TData, TValue> {
   virtualize?: boolean;
   /** Height of the virtualised scroll container. Default: "560px" */
   tableHeight?: string;
+  /**
+   * "entry" mode includes batch settings and add row UI.
+   * "all" mode is purely for viewing and editing existing rows.
+   * Default: "entry"
+   */
+  mode?: "entry" | "all";
 }
 
 type ValidationErrors = Record<string, Record<string, string>>;
@@ -142,6 +148,7 @@ export function DataTable<TData, TValue>({
   data: initialData,
   virtualize = false,
   tableHeight = "560px",
+  mode = "entry",
 }: DataTableProps<TData, TValue>) {
   const router = useRouter();
   // Ref for the virtualised scroll container (also used in non-virtual mode, harmlessly)
@@ -717,8 +724,9 @@ export function DataTable<TData, TValue>({
   return (
     <div className="space-y-6">
       {/* Batch Default Settings */}
-      <div className="rounded-[20px] bg-white/40 dark:bg-slate-900/40 backdrop-blur-3xl border border-white/50 dark:border-white/10 shadow-[0_8px_32px_0_rgba(31,38,135,0.05)] p-6">
-        <div className="flex items-center gap-2 mb-4">
+      {mode !== "all" && (
+        <div className="rounded-[20px] bg-white/40 dark:bg-slate-900/40 backdrop-blur-3xl border border-white/50 dark:border-white/10 shadow-[0_8px_32px_0_rgba(31,38,135,0.05)] p-6">
+          <div className="flex items-center gap-2 mb-4">
           <Settings2 className="h-5 w-5 text-blue-600 dark:text-blue-400" />
           <h3 className="text-lg font-semibold text-slate-800 dark:text-white">
             Batch Default Settings
@@ -839,6 +847,7 @@ export function DataTable<TData, TValue>({
           </Button>
         </div>
       </div>
+      )}
 
       {/* Action Bar */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -856,20 +865,22 @@ export function DataTable<TData, TValue>({
           >
             <Download className="mr-2 h-4 w-4" /> Export Excel
           </Button>
-          <Button
-            onClick={() => {
-              const tempId = addEmptyRow();
-              if (tempId) {
-                // Focus the fromParty field of the new row after DOM settles
-                setTimeout(() => {
-                  document.getElementById(`cell-${tempId}-fromParty`)?.focus();
-                }, 50);
-              }
-            }}
-            className="rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 shadow-lg text-white"
-          >
-            <PlusCircle className="mr-2 h-4 w-4" /> Add Courier
-          </Button>
+          {mode !== "all" && (
+            <Button
+              onClick={() => {
+                const tempId = addEmptyRow();
+                if (tempId) {
+                  // Focus the fromParty field of the new row after DOM settles
+                  setTimeout(() => {
+                    document.getElementById(`cell-${tempId}-fromParty`)?.focus();
+                  }, 50);
+                }
+              }}
+              className="rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 shadow-lg text-white"
+            >
+              <PlusCircle className="mr-2 h-4 w-4" /> Add Courier
+            </Button>
+          )}
         </div>
       </div>
 

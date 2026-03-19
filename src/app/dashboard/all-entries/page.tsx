@@ -61,6 +61,7 @@ export default function AllEntriesPage() {
           data={entries}
           virtualize
           tableHeight="calc(100vh - 260px)"
+          mode="all"
         />
       )}
     </div>
