@@ -325,7 +325,7 @@ export const columns: ColumnDef<CourierEntry>[] = [
   {
     accessorKey: "srNo",
     header: "Sr.No",
-    size: 30,
+    size: 50,
     cell: ({ row }) => {
       const val = row.getValue("srNo") as number | string;
       return (
@@ -338,7 +338,7 @@ export const columns: ColumnDef<CourierEntry>[] = [
   {
     accessorKey: "date",
     header: "Date",
-    size: 120,
+    size: 145,
     cell: EditableCell
   },
   {
@@ -350,37 +350,37 @@ export const columns: ColumnDef<CourierEntry>[] = [
   {
     accessorKey: "fromParty",
     header: "From Party",
-    size: 120,
+    size: 200,
     cell: AutocompleteCell
   },
   {
     accessorKey: "toParty",
     header: "To Party",
-    size: 120,
+    size: 200,
     cell: AutocompleteCell
   },
   {
     accessorKey: "weight",
     header: "Weight",
-    size: 90,
+    size: 100,
     cell: WeightCell
   },
   {
     accessorKey: "destination",
     header: "Destination",
-    size: 60,
+    size: 120,
     cell: AutocompleteCell
   },
   {
     accessorKey: "amount",
     header: "Amount",
-    size: 120,
+    size: 60,
     cell: EditableCell
   },
   {
     accessorKey: "status",
     header: "Status",
-    size: 50,
+    size: 100,
     cell: EditableCell
   },
   {
