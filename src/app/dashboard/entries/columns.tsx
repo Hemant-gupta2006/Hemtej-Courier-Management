@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { useState, useEffect, useRef } from "react";
 import { CourierEntry } from "@prisma/client";
-import { Trash2 } from "lucide-react";
+import { Trash2, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 declare module "@tanstack/react-table" {
@@ -38,9 +38,9 @@ declare module "@tanstack/react-table" {
 const FieldError = ({ message }: { message?: string }) => {
   if (!message) return null;
   return (
-    <p className="text-[11px] text-red-500 font-medium px-2 pt-0.5 pb-1 leading-tight">
+    <span className="absolute bottom-0 right-2 text-[10px] text-red-500 font-medium z-20 pointer-events-none">
       {message}
-    </p>
+    </span>
   );
 };
 
@@ -109,27 +109,25 @@ const AutocompleteCell = ({ getValue, row, column, table }: any) => {
   };
 
   return (
-    <div className="flex flex-col w-full">
-      <div className="relative flex items-center">
-        {suggestion && suggestion.toLowerCase().startsWith(value.toLowerCase()) && value.length > 0 && (
-          <div className="absolute inset-x-2 pointer-events-none text-slate-400 dark:text-slate-600">
-            <span className="opacity-0">{value}</span>
-            <span>{suggestion.slice(value.length)}</span>
-          </div>
-        )}
-        <Input
-          id={`cell-${identifier}-${column.id}`}
-          ref={inputRef}
-          value={value}
-          onChange={handleChange}
-          onBlur={onBlur}
-          onKeyDown={handleKeyDown}
-          className={`h-8 border-transparent bg-transparent px-2 w-full transition-all text-slate-900 dark:text-slate-100 ${error
-            ? "ring-1 ring-inset ring-red-500 border-red-400 focus-visible:ring-red-500"
-            : "hover:border-blue-500/50 focus-visible:ring-2 focus-visible:ring-blue-500"
-            }`}
-        />
-      </div>
+    <div className="h-10 w-full flex items-center px-2 relative overflow-hidden">
+      {suggestion && suggestion.toLowerCase().startsWith(value.toLowerCase()) && value.length > 0 && (
+        <div className="absolute inset-x-2 pointer-events-none text-slate-400 dark:text-slate-600 z-10 bg-transparent truncate">
+          <span className="opacity-0">{value}</span>
+          <span>{suggestion.slice(value.length)}</span>
+        </div>
+      )}
+      <Input
+        id={`cell-${identifier}-${column.id}`}
+        ref={inputRef}
+        value={value}
+        onChange={handleChange}
+        onBlur={onBlur}
+        onKeyDown={handleKeyDown}
+        className={`w-full h-8 px-2 bg-slate-800/60 dark:bg-slate-800/40 border border-white/10 rounded-lg outline-none text-sm text-slate-100 placeholder:text-slate-500 transition-colors duration-100 ${error
+          ? "ring-1 ring-inset ring-red-500 bg-red-500/10 focus:ring-red-500"
+          : "focus:ring-1 focus:ring-blue-500/40 focus:bg-slate-800/80"
+          }`}
+      />
       <FieldError message={error} />
     </div>
   );
@@ -163,53 +161,56 @@ const EditableCell = ({ getValue, row, column, table }: any) => {
         ? ["Cash", "Account", "Pending", "Delivered"]
         : ["Surface", "Air", "Cargo", "V Fast"];
     return (
-      <Select
-        value={String(value)}
-        onValueChange={(v) => {
-          setValue(v ?? "");
-          table.options.meta?.updateData(identifier, column.id, v ?? "");
-        }}
-      >
-        <SelectTrigger
-          id={`cell-${identifier}-${column.id}`}
-          ref={inputRef as any}
-          className="h-8 border-transparent focus:ring-2 focus:ring-blue-500 bg-transparent px-2 w-[110px] text-sm text-slate-900 dark:text-slate-100 hover:bg-white/40 dark:hover:bg-slate-800/40 shadow-none focus-visible:ring-offset-0"
-          onKeyDown={(e: React.KeyboardEvent<any>) => {
-            // Only handle Tab — ENTER on a Select should NOT trigger saves
-            if (e.key === "Tab")
-              table.options.meta?.handleCellKeyDown(e as any, identifier, column.id, inputRef.current);
+      <div className="h-10 w-full flex items-center px-2 relative overflow-hidden">
+        <Select
+          value={String(value)}
+          onValueChange={(v) => {
+            setValue(v ?? "");
+            table.options.meta?.updateData(identifier, column.id, v ?? "");
           }}
         >
-          <SelectValue placeholder="Select" />
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((o) => (
-            <SelectItem key={o} value={o}>{o}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+          <SelectTrigger
+            id={`cell-${identifier}-${column.id}`}
+            ref={inputRef as any}
+            className={`w-full h-8 px-2 bg-slate-800/60 dark:bg-slate-800/40 border border-white/10 rounded-lg appearance-none text-sm text-slate-100 hover:bg-slate-800/80 focus:ring-1 focus:ring-blue-500/40 focus:bg-slate-800/80 focus-visible:ring-offset-0`}
+            onKeyDown={(e: React.KeyboardEvent<any>) => {
+              if (e.key === "Tab")
+                table.options.meta?.handleCellKeyDown(e as any, identifier, column.id, inputRef.current);
+            }}
+          >
+            <SelectValue placeholder="Select" />
+          </SelectTrigger>
+          <SelectContent className="rounded-lg shadow-lg">
+            {options.map((o) => (
+              <SelectItem key={o} value={o} className="rounded-md">{o}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
     );
   }
 
   // ── Date ──
   if (column.id === "date") {
     return (
-      <Input
-        id={`cell-${identifier}-${column.id}`}
-        ref={inputRef}
-        type="date"
-        value={value ? new Date(value).toISOString().split("T")[0] : ""}
-        onChange={(e) => setValue(e.target.value)}
-        onBlur={onBlur}
-        onKeyDown={handleKeyDown}
-        className="h-8 border-transparent hover:border-blue-500/50 focus-visible:ring-2 focus-visible:ring-blue-500 bg-transparent px-2 w-[130px] transition-all text-slate-900 dark:text-slate-100"
-      />
+      <div className="h-10 w-full flex items-center px-2 relative overflow-hidden">
+        <Input
+          id={`cell-${identifier}-${column.id}`}
+          ref={inputRef}
+          type="date"
+          value={value ? new Date(value).toISOString().split("T")[0] : ""}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={onBlur}
+          onKeyDown={handleKeyDown}
+          className={`w-full h-8 px-2 bg-slate-800/60 dark:bg-slate-800/40 border border-white/10 rounded-lg outline-none text-sm text-slate-100 placeholder:text-slate-500 transition-colors duration-100 focus:ring-1 focus:ring-blue-500/40 focus:bg-slate-800/80`}
+        />
+      </div>
     );
   }
 
   // ── Generic text / number ──
   return (
-    <div className="flex flex-col w-full">
+    <div className="h-10 w-full flex items-center px-2 relative overflow-hidden">
       <Input
         id={`cell-${identifier}-${column.id}`}
         ref={inputRef}
@@ -220,9 +221,9 @@ const EditableCell = ({ getValue, row, column, table }: any) => {
         }}
         onBlur={onBlur}
         onKeyDown={handleKeyDown}
-        className={`h-8 border-transparent bg-transparent px-2 transition-all w-full text-slate-900 dark:text-slate-100 ${error
-          ? "ring-1 ring-inset ring-red-500 border-red-400 focus-visible:ring-red-500"
-          : "hover:border-blue-500/50 focus-visible:ring-2 focus-visible:ring-blue-500"
+        className={`w-full h-8 px-2 bg-slate-800/60 dark:bg-slate-800/40 border border-white/10 rounded-lg outline-none text-sm text-slate-100 placeholder:text-slate-500 transition-colors duration-100 ${error
+          ? "ring-1 ring-inset ring-red-500 bg-red-500/10 focus:ring-red-500"
+          : "focus:ring-1 focus:ring-blue-500/40 focus:bg-slate-800/80"
           }`}
       />
       <FieldError message={error} />
@@ -279,41 +280,39 @@ const WeightCell = ({ getValue, row, column, table }: any) => {
     table.options.meta?.handleCellKeyDown(e, identifier, column.id, inputRef.current);
 
   return (
-    <div className="flex flex-col w-full min-w-[130px]">
-      <div className="flex flex-row items-center gap-1">
-        <Input
-          id={`cell-${identifier}-${column.id}`}
-          ref={inputRef}
-          value={num}
-          onChange={(e) => {
-            setNum(e.target.value);
-            if (error) table.options.meta?.clearFieldError?.(identifier, column.id);
-          }}
-          onBlur={onBlur}
-          onKeyDown={handleKeyDown}
-          placeholder="0.00"
-          className={`h-8 border-transparent bg-transparent px-2 w-full transition-all text-right font-mono text-slate-900 dark:text-slate-100 ${error
-            ? "ring-1 ring-inset ring-red-500 border-red-400 focus-visible:ring-red-500"
-            : "hover:border-blue-500/50 focus-visible:ring-2 focus-visible:ring-blue-500"
-            }`}
-        />
-        <Select
-          value={unit}
-          onValueChange={(v) => {
-            const u = v || "kg";
-            setUnit(u);
-            table.options.meta?.updateData(identifier, column.id, buildStored(num, u));
-          }}
-        >
-          <SelectTrigger className="h-8 w-[58px] border-transparent hover:border-blue-500/50 bg-transparent px-1 shrink-0">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="kg">kg</SelectItem>
-            <SelectItem value="g">g</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
+    <div className="h-10 w-full flex items-center px-2 gap-1 relative overflow-hidden">
+      <Input
+        id={`cell-${identifier}-${column.id}`}
+        ref={inputRef}
+        value={num}
+        onChange={(e) => {
+          setNum(e.target.value);
+          if (error) table.options.meta?.clearFieldError?.(identifier, column.id);
+        }}
+        onBlur={onBlur}
+        onKeyDown={handleKeyDown}
+        placeholder="0.00"
+        className={`w-full h-8 px-2 bg-slate-800/60 dark:bg-slate-800/40 border border-white/10 rounded-lg outline-none text-right text-sm text-slate-100 placeholder:text-slate-500 transition-colors duration-100 ${error
+          ? "ring-1 ring-inset ring-red-500 bg-red-500/10 focus:ring-red-500"
+          : "focus:ring-1 focus:ring-blue-500/40 focus:bg-slate-800/80"
+          }`}
+      />
+      <Select
+        value={unit}
+        onValueChange={(v) => {
+          const u = v || "kg";
+          setUnit(u);
+          table.options.meta?.updateData(identifier, column.id, buildStored(num, u));
+        }}
+      >
+        <SelectTrigger className="w-[48px] h-8 px-1 bg-slate-800/60 dark:bg-slate-800/40 border border-white/10 rounded-md appearance-none text-xs text-slate-400 hover:bg-slate-800/80 focus:ring-1 focus:ring-blue-500/40 focus:bg-slate-800/80 focus-visible:ring-offset-0 text-center">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent className="rounded-lg shadow-lg">
+          <SelectItem value="kg" className="rounded-md">kg</SelectItem>
+          <SelectItem value="g" className="rounded-md">g</SelectItem>
+        </SelectContent>
+      </Select>
       <FieldError message={error} />
     </div>
   );
@@ -326,35 +325,129 @@ export const columns: ColumnDef<CourierEntry>[] = [
   {
     accessorKey: "srNo",
     header: "Sr.No",
+    size: 30,
     cell: ({ row }) => {
       const val = row.getValue("srNo") as number | string;
       return (
-        <div className="px-3 py-2 text-slate-500 dark:text-slate-400 font-medium">
+        <div className="h-10 w-full flex items-center px-2 text-sm text-slate-300 truncate overflow-hidden whitespace-nowrap">
           {val === 999999999 ? "NEW" : val || "-"}
         </div>
       );
     },
   },
-  { accessorKey: "date", header: "Date", cell: EditableCell },
-  { accessorKey: "challanNo", header: "Challan No", cell: EditableCell },
-  { accessorKey: "fromParty", header: "From Party", cell: AutocompleteCell },
-  { accessorKey: "toParty", header: "To Party", cell: AutocompleteCell },
-  { accessorKey: "weight", header: "Weight", cell: WeightCell },
-  { accessorKey: "destination", header: "Destination", cell: AutocompleteCell },
-  { accessorKey: "amount", header: "Amount", cell: EditableCell },
-  { accessorKey: "status", header: "Status", cell: EditableCell },
-  { accessorKey: "mode", header: "Mode", cell: EditableCell },
+  {
+    accessorKey: "date",
+    header: "Date",
+    size: 120,
+    cell: EditableCell
+  },
+  {
+    accessorKey: "challanNo",
+    header: "Challan No",
+    size: 90,
+    cell: EditableCell
+  },
+  {
+    accessorKey: "fromParty",
+    header: "From Party",
+    size: 120,
+    cell: AutocompleteCell
+  },
+  {
+    accessorKey: "toParty",
+    header: "To Party",
+    size: 120,
+    cell: AutocompleteCell
+  },
+  {
+    accessorKey: "weight",
+    header: "Weight",
+    size: 90,
+    cell: WeightCell
+  },
+  {
+    accessorKey: "destination",
+    header: "Destination",
+    size: 60,
+    cell: AutocompleteCell
+  },
+  {
+    accessorKey: "amount",
+    header: "Amount",
+    size: 120,
+    cell: EditableCell
+  },
+  {
+    accessorKey: "status",
+    header: "Status",
+    size: 50,
+    cell: EditableCell
+  },
+  {
+    accessorKey: "mode",
+    header: "Mode",
+    size: 100,
+    cell: EditableCell
+  },
   {
     id: "actions",
+    size: 70,
     cell: ({ row, table }) => {
       const entry = row.original as any;
       const identifier = entry.tempId || entry.id;
+      const isNew = !!entry.isNew;
+      const isEdited = !!entry.isEdited;
+      const hasErrors = Object.keys(table.options.meta?.errorsRef?.current?.[identifier] || {}).length > 0;
+
+      if (isNew || isEdited) {
+        return (
+          <div className="flex w-full h-10 items-center px-2 gap-1">
+
+            {/* 🗑 DELETE BUTTON */}
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => table.options.meta?.deleteRow(entry.id, identifier)}
+              className="h-8 w-1/2 rounded-lg text-xs px-2 text-red-500 hover:bg-red-500/10 flex items-center justify-center transition-transform hover:scale-[1.02] active:scale-[0.98]"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+
+            {/* 💾 SAVE BUTTON */}
+            <Button
+              id={`save-btn-${identifier}`}
+              size="sm"
+              disabled={hasErrors}
+              onClick={async () => {
+                if (isNew) {
+                  const res = await table.options.meta?.saveNewRow(identifier, true);
+                  if (res?.success && res.nextTempId) {
+                    setTimeout(() => {
+                      document.getElementById(`cell-${res.nextTempId}-fromParty`)?.focus();
+                    }, 50);
+                  }
+                } else {
+                  table.options.meta?.saveEditedRow(identifier);
+                }
+              }}
+              className={`h-8 w-1/2 rounded-lg text-xs px-2 flex items-center justify-center transition-transform hover:scale-[1.02] active:scale-[0.98] ${hasErrors
+                ? "bg-transparent text-slate-500 cursor-not-allowed"
+                : "bg-blue-600 hover:bg-blue-700 text-white"
+                }`}
+            >
+              <Save className="h-3 w-3 mr-1" />
+              {isNew ? "Save" : "Update"}
+            </Button>
+          </div>
+        );
+      }
+
       return (
         <Button
           variant="ghost"
           size="icon"
           onClick={() => table.options.meta?.deleteRow(entry.id, identifier)}
-          className="h-8 w-8 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
+          className="h-8 w-full rounded-lg text-xs px-2 text-red-500 hover:bg-red-500/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all hover:scale-[1.02] active:scale-[0.98]"
         >
           <Trash2 className="h-4 w-4" />
         </Button>

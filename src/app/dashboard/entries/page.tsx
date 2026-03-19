@@ -226,7 +226,7 @@ export default function CourierEntryPage() {
 
   return (
     <>
-        <DeleteAllModal
+      <DeleteAllModal
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
         onConfirm={handleDeleteAll}
@@ -249,58 +249,68 @@ export default function CourierEntryPage() {
         }}
       />
 
-      <div className="h-full flex-1 flex-col space-y-8 flex">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h2 className="text-2xl font-bold tracking-tight">Courier Entries</h2>
-            <p className="text-muted-foreground text-sm">
-              {isMobile
-                ? "Tap + to add a new entry."
-                : "Manage courier shipments. Click a cell to edit."}
-            </p>
-          </div>
-
-          {isMobile && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setDefaultDateModalOpen(true)}
-              className="md:hidden rounded-xl border-blue-200 dark:border-blue-900/50 bg-blue-50/50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 gap-1.5 h-9 font-semibold text-xs transition-all active:scale-95"
-            >
-              <Calendar className="h-3.5 w-3.5" />
-              {mobileDefaultDate ? mobileDefaultDate : "Set Default Date"}
-            </Button>
-          )}
-
-          {!isMobile && (
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                onClick={() => router.push("/dashboard/all-entries")}
-                className="rounded-xl border-teal-300 dark:border-teal-700 text-teal-700 dark:text-teal-300 hover:bg-teal-50 dark:hover:bg-teal-900/20 gap-2"
-              >
-                <List className="h-4 w-4" />
-                Show All Entries
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => setDeleteOpen(true)}
-                className="rounded-xl border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 gap-2"
-              >
-                <Trash2 className="h-4 w-4" />
-                Delete All
-              </Button>
+      <div className="h-full flex flex-col overflow-hidden">
+        {/* FIXED TOP AREA */}
+        <div className="flex-shrink-0 space-y-4">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <h2 className="text-2xl font-bold tracking-tight">Courier Entries</h2>
+              <p className="text-muted-foreground text-sm">
+                {isMobile
+                  ? "Tap + to add a new entry."
+                  : "Manage courier shipments. Click a cell to edit."}
+              </p>
             </div>
-          )}
+
+            {isMobile && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setDefaultDateModalOpen(true)}
+                className="md:hidden rounded-xl border-blue-200 dark:border-blue-900/50 bg-blue-50/50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 gap-1.5 h-9 font-semibold text-xs transition-all active:scale-95"
+              >
+                <Calendar className="h-3.5 w-3.5" />
+                {mobileDefaultDate ? mobileDefaultDate : "Set Default Date"}
+              </Button>
+            )}
+
+            {!isMobile && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => router.push("/dashboard/all-entries")}
+                  className="rounded-xl border-teal-300 dark:border-teal-700 text-teal-700 dark:text-teal-300 hover:bg-teal-50 dark:hover:bg-teal-900/20 gap-2"
+                >
+                  <List className="h-4 w-4" />
+                  Show All Entries
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setDeleteOpen(true)}
+                  className="rounded-xl border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 gap-2"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete All
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
 
-
-        {/* Desktop table — receives only 20 rows */}
-        {!isMobile && <DataTable columns={columns} data={visibleData} />}
+        {/* SCROLLABLE TABLE AREA */}
+        {!isMobile && (
+          <div className="flex-1 overflow-hidden mt-4">
+            <div className="h-full overflow-auto will-change-transform">
+              <div className="w-full overflow-x-auto pb-4">
+                <DataTable columns={columns} data={visibleData} />
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Footer: subtle info + show-all link */}
         {!isMobile && (
-          <div className="flex justify-between items-center text-xs text-slate-400 dark:text-slate-500 mt-1">
+          <div className="flex-shrink-0 flex justify-between items-center text-xs text-slate-400 dark:text-slate-500 mt-2">
             <span>
               {entries.length > 20
                 ? `Showing latest 20 of ${entries.length} entries for faster typing`
@@ -321,7 +331,7 @@ export default function CourierEntryPage() {
 
         {/* Mobile: card list + floating form */}
         {isMobile && (
-          <div className="space-y-3 pb-24">
+          <div className="flex-1 overflow-y-auto space-y-3 pb-24 mt-4">
             {entries.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-24 text-slate-400 text-sm gap-2">
                 <span className="text-4xl">📦</span>
