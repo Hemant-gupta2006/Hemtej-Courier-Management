@@ -87,8 +87,8 @@ const MemoizedRow = React.memo(
     return (
       <tr
         className={`group border-b border-white/5 transition-all duration-150 ${isEdited && !isNew
-            ? "bg-amber-500/10 hover:bg-amber-500/20"
-            : "hover:bg-white/5"
+          ? "bg-amber-500/10 hover:bg-amber-500/20"
+          : "hover:bg-white/5"
           }`}
       >
         {row.getVisibleCells().map((cell: any) => (
@@ -769,7 +769,7 @@ export function DataTable<TData, TValue>({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {["Cash", "Account", "Pending", "Delivered"].map((o) => (
+                  {["Cash", "Account"].map((o) => (
                     <SelectItem key={o} value={o}>{o}</SelectItem>
                   ))}
                 </SelectContent>

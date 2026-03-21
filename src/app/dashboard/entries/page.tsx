@@ -232,8 +232,6 @@ function MobileEntryCard({ entry }: { entry: any }) {
   const statusColor: Record<string, string> = {
     Cash: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
     Account: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
-    Pending: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-    Delivered: "bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300",
   };
 
   const fmt = (w: string) => {
@@ -242,7 +240,13 @@ function MobileEntryCard({ entry }: { entry: any }) {
   };
 
   return (
-    <div className="rounded-2xl bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl border border-white/50 dark:border-white/10 shadow-sm p-4 space-y-3">
+    <motion.div
+      initial={{ opacity: 0, scale: 0.98 }}
+      animate={{ opacity: 1, scale: 1 }}
+      transition={{ duration: 0.2 }}
+      className="rounded-2xl bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl border border-white/50 dark:border-white/10 shadow-sm hover:shadow-md transition-all p-4 space-y-3 relative overflow-hidden"
+    >
+      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500/20 to-purple-500/20" />
       {/* Header row */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -284,6 +288,6 @@ function MobileEntryCard({ entry }: { entry: any }) {
           {entry.amount ? `₹${Number(entry.amount).toLocaleString("en-IN")}` : "-"}
         </span>
       </div>
-    </div>
+    </motion.div>
   );
 }

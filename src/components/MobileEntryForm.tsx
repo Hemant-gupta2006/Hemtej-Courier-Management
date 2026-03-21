@@ -23,7 +23,7 @@ type FormData = {
 
 type Errors = Partial<Record<keyof FormData | "weight", string>>;
 
-const STATUS_OPTIONS = ["Cash", "Account", "Pending", "Delivered"];
+const STATUS_OPTIONS = ["Cash", "Account"];
 const MODE_OPTIONS = ["Surface", "Air", "Cargo", "V Fast"];
 
 // ── Helper: auto-capitalize first letter of each word ──
@@ -41,6 +41,7 @@ function AutoInput({
   suggestions,
   error,
   placeholder,
+  onKeyDown,
 }: {
   id: string;
   label: string;
@@ -49,6 +50,7 @@ function AutoInput({
   suggestions: string[];
   error?: string;
   placeholder?: string;
+  onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState(value);
@@ -94,11 +96,11 @@ function AutoInput({
           }}
           onFocus={() => setOpen(true)}
           onBlur={() => setTimeout(() => setOpen(false), 150)}
-          className={`h-12 text-base rounded-xl pr-10 ${
-            error
+          onKeyDown={onKeyDown}
+          className={`h-12 text-base rounded-xl pr-10 bg-slate-50/50 dark:bg-slate-900/50 focus-visible:ring-2 focus-visible:ring-blue-500/40 transition-all ${error
               ? "border-red-500 ring-1 ring-red-500 focus-visible:ring-red-500"
               : "border-slate-200 dark:border-slate-700 focus-visible:ring-blue-500"
-          }`}
+            }`}
         />
         <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
         <AnimatePresence>
@@ -117,9 +119,8 @@ function AutoInput({
                   className="flex items-center gap-2 px-4 py-3 text-sm text-slate-700 dark:text-slate-200 hover:bg-blue-50 dark:hover:bg-slate-800 cursor-pointer transition-colors"
                 >
                   <Check
-                    className={`h-4 w-4 text-blue-500 shrink-0 ${
-                      value === item ? "opacity-100" : "opacity-0"
-                    }`}
+                    className={`h-4 w-4 text-blue-500 shrink-0 ${value === item ? "opacity-100" : "opacity-0"
+                      }`}
                   />
                   {item}
                 </li>
@@ -154,11 +155,10 @@ function SegmentedSelect({
             key={opt}
             type="button"
             onClick={() => onChange(opt)}
-            className={`px-4 py-2.5 rounded-xl text-sm font-medium border transition-all ${
-              value === opt
+            className={`px-4 py-2.5 rounded-xl text-sm font-medium border transition-all ${value === opt
                 ? "bg-blue-600 border-blue-600 text-white shadow-sm"
                 : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-blue-400"
-            }`}
+              }`}
           >
             {opt}
           </button>
@@ -183,9 +183,14 @@ export function MobileEntryForm({
   const [open, setOpen] = useState(false);
   const [loading, setSaving] = useState(false);
 
+  const getNextChallan = () => {
+    const nums = existingChallans.map(Number).filter(v => !isNaN(v) && v > 0);
+    return nums.length > 0 ? String(Math.max(...nums) + 1) : "1001";
+  };
+
   const defaultForm = (): FormData => ({
     date: mobileDefaultDate || new Date().toISOString().split("T")[0],
-    challanNo: "",
+    challanNo: getNextChallan(),
     fromParty: "",
     toParty: "",
     weightNum: "100",
@@ -199,10 +204,17 @@ export function MobileEntryForm({
   const [form, setForm] = useState<FormData>(defaultForm());
   const [errors, setErrors] = useState<Errors>({});
 
-  // When default date changes, update form if it's currently at default
+  // Recompute form when it opens to grab the latest challan number
+  useEffect(() => {
+    if (open) {
+      setForm(defaultForm());
+    }
+  }, [open]);
+
+  // Update background form if default date changes while closed
   useEffect(() => {
     if (!open) {
-      setForm(defaultForm());
+      setForm(f => ({ ...f, date: mobileDefaultDate || new Date().toISOString().split("T")[0] }));
     }
   }, [mobileDefaultDate, open]);
 
@@ -224,6 +236,17 @@ export function MobileEntryForm({
     if (form.amount && isNaN(Number(form.amount)))
       e.amount = "Amount must be a number.";
     return e;
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, nextFieldId: string | null) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (nextFieldId) {
+        document.getElementById(nextFieldId)?.focus();
+      } else {
+        e.currentTarget.blur();
+      }
+    }
   };
 
   const handleSave = async () => {
@@ -337,7 +360,8 @@ export function MobileEntryForm({
                     type="date"
                     value={form.date}
                     onChange={(e) => set("date", e.target.value)}
-                    className="h-12 text-base rounded-xl border-slate-200 dark:border-slate-700"
+                    onKeyDown={(e) => handleKeyDown(e, "m-challan")}
+                    className="h-12 text-base rounded-xl bg-slate-50/50 dark:bg-slate-900/50 focus-visible:ring-2 focus-visible:ring-blue-500/40 transition-all border-slate-200 dark:border-slate-700"
                   />
                 </div>
 
@@ -350,10 +374,10 @@ export function MobileEntryForm({
                     id="m-challan"
                     value={form.challanNo}
                     onChange={(e) => set("challanNo", e.target.value)}
+                    onKeyDown={(e) => handleKeyDown(e, "m-from")}
                     placeholder="e.g. 1042"
-                    className={`h-12 text-base rounded-xl ${
-                      errors.challanNo ? "border-red-500 ring-1 ring-red-500" : "border-slate-200 dark:border-slate-700"
-                    }`}
+                    className={`h-12 text-base rounded-xl bg-slate-50/50 dark:bg-slate-900/50 focus-visible:ring-2 focus-visible:ring-blue-500/40 transition-all ${errors.challanNo ? "border-red-500 ring-1 ring-red-500" : "border-slate-200 dark:border-slate-700"
+                      }`}
                   />
                   {errors.challanNo && <p className="text-xs text-red-500 font-medium">{errors.challanNo}</p>}
                 </div>
@@ -364,6 +388,7 @@ export function MobileEntryForm({
                   label="From Party *"
                   value={form.fromParty}
                   onChange={(v) => set("fromParty", v)}
+                  onKeyDown={(e) => handleKeyDown(e, "m-to")}
                   suggestions={autocompleteData.fromParties}
                   error={errors.fromParty}
                   placeholder="Sender name"
@@ -375,6 +400,7 @@ export function MobileEntryForm({
                   label="To Party *"
                   value={form.toParty}
                   onChange={(v) => set("toParty", v)}
+                  onKeyDown={(e) => handleKeyDown(e, "m-weight")}
                   suggestions={autocompleteData.toParties}
                   error={errors.toParty}
                   placeholder="Receiver name"
@@ -385,14 +411,15 @@ export function MobileEntryForm({
                   <Label className="text-sm font-semibold text-slate-700 dark:text-slate-200">Weight</Label>
                   <div className="flex gap-2">
                     <Input
+                      id="m-weight"
                       type="text"
                       inputMode="decimal"
                       value={form.weightNum}
                       onChange={(e) => set("weightNum", e.target.value)}
+                      onKeyDown={(e) => handleKeyDown(e, "m-dest")}
                       placeholder="100"
-                      className={`h-12 text-base rounded-xl flex-1 ${
-                        errors.weight ? "border-red-500 ring-1 ring-red-500" : "border-slate-200 dark:border-slate-700"
-                      }`}
+                      className={`h-12 text-base rounded-xl flex-1 bg-slate-50/50 dark:bg-slate-900/50 focus-visible:ring-2 focus-visible:ring-blue-500/40 transition-all ${errors.weight ? "border-red-500 ring-1 ring-red-500" : "border-slate-200 dark:border-slate-700"
+                        }`}
                     />
                     <div className="flex rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden shrink-0">
                       {["g", "kg"].map((u) => (
@@ -400,11 +427,10 @@ export function MobileEntryForm({
                           key={u}
                           type="button"
                           onClick={() => set("weightUnit", u)}
-                          className={`px-5 h-12 text-sm font-semibold transition-colors ${
-                            form.weightUnit === u
+                          className={`px-5 h-12 text-sm font-semibold transition-colors ${form.weightUnit === u
                               ? "bg-blue-600 text-white"
                               : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300"
-                          }`}
+                            }`}
                         >
                           {u}
                         </button>
@@ -420,6 +446,7 @@ export function MobileEntryForm({
                   label="Destination *"
                   value={form.destination}
                   onChange={(v) => set("destination", v)}
+                  onKeyDown={(e) => handleKeyDown(e, "m-amount")}
                   suggestions={autocompleteData.destinations}
                   error={errors.destination}
                   placeholder="City / Hub"
@@ -436,10 +463,10 @@ export function MobileEntryForm({
                       inputMode="decimal"
                       value={form.amount}
                       onChange={(e) => set("amount", e.target.value)}
+                      onKeyDown={(e) => handleKeyDown(e, null)}
                       placeholder="0"
-                      className={`h-12 text-base rounded-xl pl-8 ${
-                        errors.amount ? "border-red-500 ring-1 ring-red-500" : "border-slate-200 dark:border-slate-700"
-                      }`}
+                      className={`h-12 text-base rounded-xl pl-8 bg-slate-50/50 dark:bg-slate-900/50 focus-visible:ring-2 focus-visible:ring-blue-500/40 transition-all ${errors.amount ? "border-red-500 ring-1 ring-red-500" : "border-slate-200 dark:border-slate-700"
+                        }`}
                     />
                   </div>
                   {errors.amount && <p className="text-xs text-red-500 font-medium">{errors.amount}</p>}

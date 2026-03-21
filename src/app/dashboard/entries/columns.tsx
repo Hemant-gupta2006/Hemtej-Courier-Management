@@ -158,7 +158,7 @@ const EditableCell = ({ getValue, row, column, table }: any) => {
   if (column.id === "status" || column.id === "mode") {
     const options =
       column.id === "status"
-        ? ["Cash", "Account", "Pending", "Delivered"]
+        ? ["Cash", "Account"]
         : ["Surface", "Air", "Cargo", "V Fast"];
     return (
       <div className="h-10 w-full flex items-center px-1 relative overflow-hidden">
