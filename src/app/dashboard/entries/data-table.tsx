@@ -693,36 +693,8 @@ export function DataTable<TData, TValue>({
   };
 
   const exportExcel = () => {
-    const sorted = [...data].sort((a, b) => (parseInt(a.srNo) || 0) - (parseInt(b.srNo) || 0));
-    const rows = sorted.map((r) => ({
-      "Sr.No": Number(r.srNo) || 0,
-      Date: new Date(r.date),
-      "Challan No": r.challanNo,
-      "From Party": r.fromParty,
-      "To Party": r.toParty,
-      Weight: formatExportWeight(r.weight),
-      Destination: r.destination,
-      Amount: Number(r.amount) || 0,
-      Status: r.status,
-      Mode: r.mode,
-    }));
-
-    const ws = XLSX.utils.json_to_sheet(rows, { dateNF: "dd/mm/yyyy" });
-    ws["!cols"] = Object.keys(rows[0] || {}).map((k) => ({
-      wch:
-        Math.max(k.length, ...rows.map((r) => {
-          const v = r[k as keyof typeof r];
-          return v instanceof Date ? 10 : v ? String(v).length : 0;
-        })) + 2,
-    }));
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Couriers");
-    saveAs(
-      new Blob([XLSX.write(wb, { bookType: "xlsx", type: "array" })], {
-        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;charset=UTF-8",
-      }),
-      `Couriers_Export_${new Date().toISOString().split("T")[0]}.xlsx`
-    );
+    // Navigate to the API route to download ALL entries without pagination
+    window.location.href = "/api/export/excel";
   };
 
   // ─────────────────────────────────────────────

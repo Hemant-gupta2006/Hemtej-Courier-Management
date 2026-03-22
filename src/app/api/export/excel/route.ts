@@ -17,16 +17,22 @@ export async function GET(req: Request) {
 
     const formatExportWeight = (weightStr: string | null) => {
       if (!weightStr) return "";
-      const w = weightStr.toLowerCase().trim();
-      if (w.includes("kg")) {
-        return w.replace(/\s+/g, ""); 
-      } else {
-        const num = parseFloat(w);
-        if (!isNaN(num)) {
-          return `${(num / 1000).toFixed(3)}gm`;
-        }
-        return w;
+      const lower = String(weightStr).toLowerCase().trim();
+      
+      if (lower.includes("kg")) {
+        const num = parseFloat(lower);
+        return !isNaN(num) ? `${num} kg` : lower.replace(/\s+/g, "");
       }
+      
+      const g = parseFloat(lower);
+      if (isNaN(g)) return lower;
+      
+      if (g >= 1000) {
+        return `${Number((g / 1000).toFixed(3))} kg`;
+      }
+      
+      // Reverted logic for grams to original format
+      return `${(g / 1000).toFixed(3)}gm`;
     };
 
     const tableData = couriers.map(row => ({

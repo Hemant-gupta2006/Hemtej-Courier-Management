@@ -19,15 +19,39 @@ export async function GET(req: Request) {
 
     const { searchParams } = new URL(req.url);
     const limitParam = searchParams.get("limit");
+    const pageParam = searchParams.get("page");
+    
+    // Determine pagination parameters
     const take = limitParam ? parseInt(limitParam, 10) : undefined;
+    const page = pageParam ? parseInt(pageParam, 10) : 1;
+    let skip = undefined;
+    
+    if (take && page) {
+      skip = (page - 1) * take;
+    }
 
-    const couriers = await prisma.courierEntry.findMany({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-      ...(take ? { take } : {}),
+    // Execute queries concurrently
+    const [couriers, total] = await Promise.all([
+      prisma.courierEntry.findMany({
+        where: { userId },
+        orderBy: { createdAt: 'desc' },
+        ...(take ? { take } : {}),
+        ...(skip !== undefined ? { skip } : {}),
+      }),
+      prisma.courierEntry.count({
+        where: { userId }
+      })
+    ]);
+
+    const totalPages = take ? Math.ceil(total / take) : 1;
+
+    return NextResponse.json({ 
+      success: true, 
+      data: couriers,
+      total,
+      page,
+      totalPages
     });
-
-    return NextResponse.json({ success: true, data: couriers });
   } catch (error) {
     console.error("[COURIERS_GET]", userId, error);
     return NextResponse.json({ success: false, data: [], error: "Internal server error" }, { status: 500 });
