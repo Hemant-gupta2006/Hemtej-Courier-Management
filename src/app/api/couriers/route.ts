@@ -2,32 +2,63 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 export async function GET() {
+  let userId = "unknown";
   try {
     const session = await getServerSession(authOptions);
-    if (!session) return new NextResponse("Unauthorized", { status: 401 });
+    if (!session || !session.user || !(session.user as any).id) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
+    userId = String((session.user as any).id);
+
+    if (!checkRateLimit(userId)) {
+      return NextResponse.json({ success: false, error: "Too Many Requests" }, { status: 429 });
+    }
 
     const couriers = await prisma.courierEntry.findMany({
-      where: { userId: (session.user as any).id },
+      where: { userId },
       orderBy: { createdAt: 'desc' },
     });
 
-    return NextResponse.json(couriers);
+    return NextResponse.json({ success: true, data: couriers });
   } catch (error) {
-    console.log("[COURIERS_GET]", error);
-    return new NextResponse("Internal server error", { status: 500 });
+    console.error("[COURIERS_GET]", userId, error);
+    return NextResponse.json({ success: false, data: [], error: "Internal server error" }, { status: 500 });
   }
 }
 
 export async function POST(req: Request) {
+  let userId = "unknown";
   try {
     const session = await getServerSession(authOptions);
-    if (!session) return new NextResponse("Unauthorized", { status: 401 });
+    if (!session || !session.user || !(session.user as any).id) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
+    userId = String((session.user as any).id);
 
-    const body = await req.json();
-    const { date, fromParty, toParty, weight, destination, amount, status, mode } = body;
-    const userId = (session.user as any).id;
+    if (!checkRateLimit(userId)) {
+      return NextResponse.json({ success: false, error: "Too Many Requests" }, { status: 429 });
+    }
+
+    const body = await req.json().catch(() => ({}));
+    if (!body || Object.keys(body).length === 0) {
+      return NextResponse.json({ success: false, error: "Empty payload" }, { status: 400 });
+    }
+
+    const date = body.date && !isNaN(Date.parse(body.date)) ? new Date(body.date) : new Date();
+    const fromParty = String(body.fromParty || "").trim();
+    const toParty = String(body.toParty || "").trim();
+    const weight = String(body.weight || "100g").trim();
+    const destination = String(body.destination || "").trim();
+    const amount = Number(body.amount) || 0;
+    const status = String(body.status || "Cash").trim();
+    const mode = String(body.mode || "Surface").trim();
+
+    if (!fromParty || !toParty || !destination) {
+      return NextResponse.json({ success: false, error: "Missing required fields" }, { status: 400 });
+    }
 
     const MAX_RETRIES = 5;
     let attempts = 0;
@@ -36,17 +67,13 @@ export async function POST(req: Request) {
     while (attempts < MAX_RETRIES) {
       try {
         courier = await prisma.$transaction(async (tx) => {
-          // Fetch the latest challanNo for the given userId
           const lastEntry = await tx.courierEntry.findFirst({
             where: { userId },
             orderBy: { challanNo: "desc" },
             select: { challanNo: true }
           });
-
-          // Generate next challanNo
           const nextChallanNo = lastEntry ? lastEntry.challanNo + 1 : 1001;
 
-          // Atomic fetch of MAX srNo
           const maxSrNoResult = await tx.courierEntry.aggregate({
             where: { userId },
             _max: { srNo: true }
@@ -57,37 +84,33 @@ export async function POST(req: Request) {
             data: {
               srNo: newSrNo,
               userId,
-              date: new Date(date || new Date()),
+              date,
               challanNo: nextChallanNo,
               fromParty,
               toParty,
-              weight: String(weight || "100g"),
+              weight,
               destination,
-              amount: Number(amount) || 0,
-              status: status || "Cash",
-              mode: mode || "Surface",
+              amount,
+              status,
+              mode,
             }
           });
         });
-        
-        break; // Successfully created
+        break;
       } catch (error: any) {
-        // P2002 is Prisma's unique constraint violation error code
         if (error.code === 'P2002') {
-          // Retry the transaction to get a new unique number
           attempts++;
           if (attempts === MAX_RETRIES) throw error;
           await new Promise(res => setTimeout(res, 50));
-          continue; // Retry
+          continue;
         }
         throw error;
       }
     }
 
-    return NextResponse.json(courier);
+    return NextResponse.json({ success: true, data: courier });
   } catch (error) {
-    console.log("[COURIERS_POST]", error);
-    return new NextResponse("Internal server error", { status: 500 });
+    console.error("[COURIERS_POST]", userId, error);
+    return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
   }
 }
-

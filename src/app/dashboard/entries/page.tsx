@@ -112,8 +112,14 @@ export default function CourierEntryPage() {
       fetch("/api/couriers"),
       fetch("/api/couriers/autocomplete"),
     ]);
-    if (entRes.ok) setEntries(await entRes.json());
-    if (acRes.ok) setAutocompleteData(await acRes.json());
+    if (entRes.ok) {
+      const json = await entRes.json();
+      setEntries(Array.isArray(json) ? json : (json.data || []));
+    }
+    if (acRes.ok) {
+      const json = await acRes.json();
+      setAutocompleteData(json.data || json);
+    }
   }, []);
 
   useEffect(() => {

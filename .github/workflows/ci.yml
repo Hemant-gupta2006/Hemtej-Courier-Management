@@ -1,0 +1,33 @@
+name: Next.js CI
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # We run prisma generate here to ensure the Prisma client is 
+      # always up-to-date with the database schema before the Next.js build.
+      # This prevents production crashes due to stale Prisma client or schema mismatches.
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      - name: Build Next.js app
+        run: npm run build

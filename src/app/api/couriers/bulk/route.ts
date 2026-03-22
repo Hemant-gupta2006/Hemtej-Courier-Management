@@ -2,22 +2,30 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 export async function POST(req: Request) {
+  let userId = "unknown";
   try {
     const session = await getServerSession(authOptions);
-    if (!session) return new NextResponse("Unauthorized", { status: 401 });
+    if (!session || !session.user || !(session.user as any).id) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
+    userId = String((session.user as any).id);
 
-    const body = await req.json();
-    const { items } = body;
-
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return new NextResponse("Invalid data", { status: 400 });
+    if (!checkRateLimit(userId)) {
+      return NextResponse.json({ success: false, error: "Too Many Requests" }, { status: 429 });
     }
 
-    // Attempt to process multiple
+    const body = await req.json().catch(() => ({}));
+    const { items } = body;
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return NextResponse.json({ success: false, error: "Invalid data: items must be a non-empty array" }, { status: 400 });
+    }
+
     let maxSrNoResult = await prisma.courierEntry.aggregate({
-      where: { userId: (session.user as any).id },
+      where: { userId },
       _max: { srNo: true }
     });
     
@@ -25,39 +33,41 @@ export async function POST(req: Request) {
 
     const createdItems = [];
     for (const item of items) {
-      if (!item.challanNo) continue;
+      if (!item || typeof item !== "object") continue;
+      
+      const parsedChallan = parseInt(item.challanNo, 10);
+      if (isNaN(parsedChallan)) continue;
 
       const existing = await prisma.courierEntry.findFirst({
-        where: { 
-          challanNo: String(item.challanNo),
-          userId: (session.user as any).id
-        }
+        where: { challanNo: parsedChallan, userId }
       });
-
-      if (existing) continue; // Skip existing challan numbers
+      if (existing) continue;
 
       currentSrNo++;
       
+      const date = item.date && !isNaN(Date.parse(item.date)) ? new Date(item.date) : new Date();
+      const amount = Number(item.amount) || 0;
+
       const created = await prisma.courierEntry.create({
         data: {
-          userId: (session.user as any).id,
+          userId,
           srNo: currentSrNo,
-          date: item.date ? new Date(item.date) : new Date(),
-          challanNo: String(item.challanNo),
-          fromParty: item.fromParty || "",
-          toParty: item.toParty || "",
-          weight: String(item.weight || ""),
-          destination: item.destination || "",
-          amount: Number(item.amount || 0),
-          status: item.status || "Cash",
+          date,
+          challanNo: parsedChallan,
+          fromParty: String(item.fromParty || "").trim(),
+          toParty: String(item.toParty || "").trim(),
+          weight: String(item.weight || "100g").trim(),
+          destination: String(item.destination || "").trim(),
+          amount,
+          status: String(item.status || "Cash").trim(),
         }
       });
       createdItems.push(created);
     }
 
-    return NextResponse.json(createdItems);
+    return NextResponse.json({ success: true, data: createdItems });
   } catch (error) {
-    console.log("[COURIERS_BULK_POST]", error);
-    return new NextResponse("Internal server error", { status: 500 });
+    console.error("[COURIERS_BULK_POST]", userId, error);
+    return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
   }
 }

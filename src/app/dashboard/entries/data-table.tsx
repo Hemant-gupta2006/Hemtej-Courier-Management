@@ -464,7 +464,8 @@ export function DataTable<TData, TValue>({
           return { success: false };
         }
 
-        const saved = await res.json();
+        const jsonBody = await res.json();
+        const saved = jsonBody.data || jsonBody;
         toast.success("Row saved!");
 
         const nextTempId = addNextRow ? `new-${Date.now()}-${Math.random()}` : undefined;

@@ -2,14 +2,23 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 export async function GET() {
+  let userId = "unknown";
   try {
     const session = await getServerSession(authOptions);
-    if (!session) return new NextResponse("Unauthorized", { status: 401 });
+    if (!session || !session.user || !(session.user as any).id) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
+    userId = String((session.user as any).id);
+
+    if (!checkRateLimit(userId)) {
+      return NextResponse.json({ success: false, error: "Too Many Requests" }, { status: 429 });
+    }
 
     const couriers = await prisma.courierEntry.findMany({
-      where: { userId: (session.user as any).id },
+      where: { userId },
       select: {
         destination: true,
         fromParty: true,
@@ -29,14 +38,17 @@ export async function GET() {
     const statuses = Array.from(new Set(couriers.map(c => c.status).filter(Boolean)));
 
     return NextResponse.json({
-      destinations,
-      fromParties,
-      toParties,
-      weights,
-      statuses
+      success: true,
+      data: {
+        destinations,
+        fromParties,
+        toParties,
+        weights,
+        statuses
+      }
     });
   } catch (error) {
-    console.log("[AUTOCOMPLETE_GET]", error);
-    return new NextResponse("Internal server error", { status: 500 });
+    console.error("[AUTOCOMPLETE_GET]", userId, error);
+    return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
   }
 }
