@@ -377,14 +377,15 @@ export function DataTable<TData, TValue>({
    * Pure helper — computes the next challan number from a locally available snapshot for UI prediction.
    */
   const getNextChallan = React.useCallback((d: any[]): string => {
-    const nums = d
-      .filter((r) => !r.isNew && String(r.challanNo).toLowerCase() !== "auto")
-      .map((r) => Number(r.challanNo))
-      .filter((v) => !isNaN(v) && v > 0);
-    return nums.length ? String(Math.max(...nums) + 1) : "1001";
+    const validRows = d.filter((r) => !r.isNew && String(r.challanNo).toLowerCase() !== "auto");
+    if (validRows.length === 0) return "1001";
+    
+    // d is already sorted newest-first, so the first valid row is the most recently created.
+    const lastChallan = Number(validRows[0].challanNo);
+    return !isNaN(lastChallan) && lastChallan > 0 ? String(lastChallan + 1) : "1001";
   }, []);
 
-  const addEmptyRow = React.useCallback((): string | undefined => {
+  const addEmptyRow = React.useCallback(async (): Promise<string | undefined> => {
     // Read errors from ref to avoid stale deps
     const hasErrors = Object.values(errorsRef.current).some((e) => Object.keys(e).length > 0);
     if (hasErrors) {
@@ -399,9 +400,25 @@ export function DataTable<TData, TValue>({
     // Generate tempId outside setData so we can return it for focus
     const tempId = `new-${Date.now()}-${Math.random()}`;
 
+    let nextChallan = "1001";
+    try {
+      const res = await fetch("/api/couriers/next-challan");
+      if (res.ok) {
+        const body = await res.json();
+        if (body.success && body.data?.nextChallanNo) {
+           nextChallan = String(body.data.nextChallanNo);
+        }
+      } else {
+        nextChallan = getNextChallan(dataRef.current);
+      }
+    } catch (err) {
+      console.error("Failed to fetch next challan:", err);
+      // Fallback
+      nextChallan = getNextChallan(dataRef.current);
+    }
+
     setData((committed) => {
       // Predict challan for visual UI feedback only. Backend enforces actual value later.
-      const nextChallan = getNextChallan(committed);
       const newRow = {
         ...createCleanRow(nextChallan),
         tempId, // use the pre-generated tempId
@@ -478,7 +495,7 @@ export function DataTable<TData, TValue>({
             return r;
           });
           if (!addNextRow || !nextTempId) return updated;
-          const nextChallan = getNextChallan(updated);
+          const nextChallan = String(Number(saved.challanNo) + 1);
           const freshRow = { ...createCleanRow(nextChallan), tempId: nextTempId };
           return [freshRow, ...updated];
         });

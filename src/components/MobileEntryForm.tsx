@@ -183,16 +183,15 @@ export function MobileEntryForm({
   const [open, setOpen] = useState(false);
   const [loading, setSaving] = useState(false);
 
-  // Predict the next challan for UI purposes - Backend enforces actual number
+  // Predict the next challan based on the most recent entry
   const getNextChallan = () => {
     if (!existingChallans || existingChallans.length === 0) return "1001";
     
-    const nums = existingChallans
-      .map(ch => parseInt(ch, 10))
-      .filter(v => !isNaN(v) && v > 0);
+    // existingChallans is already sorted by newest first (descending createdAt)
+    const lastCreatedChallan = parseInt(existingChallans[0], 10);
       
-    if (nums.length === 0) return "1001";
-    return String(Math.max(...nums) + 1);
+    if (isNaN(lastCreatedChallan) || lastCreatedChallan <= 0) return "1001";
+    return String(lastCreatedChallan + 1);
   };
 
   const defaultForm = (): FormData => ({
