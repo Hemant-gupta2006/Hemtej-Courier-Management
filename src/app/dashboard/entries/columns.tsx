@@ -110,24 +110,26 @@ const AutocompleteCell = ({ getValue, row, column, table }: any) => {
 
   return (
     <div className="h-10 w-full flex items-center px-1 relative overflow-hidden">
-      {suggestion && suggestion.toLowerCase().startsWith(value.toLowerCase()) && value.length > 0 && (
-        <div className="absolute inset-x-2 pointer-events-none text-slate-400 dark:text-slate-600 z-10 bg-transparent truncate">
-          <span className="opacity-0">{value}</span>
-          <span>{suggestion.slice(value.length)}</span>
-        </div>
-      )}
-      <Input
-        id={`cell-${identifier}-${column.id}`}
-        ref={inputRef}
-        value={value}
-        onChange={handleChange}
-        onBlur={onBlur}
-        onKeyDown={handleKeyDown}
-        className={`w-full h-8 px-2 bg-slate-800/60 dark:bg-slate-800/40 border border-white/10 rounded-lg outline-none text-sm text-slate-100 placeholder:text-slate-500 transition-colors duration-100 ${error
-          ? "ring-1 ring-inset ring-red-500 bg-red-500/10 focus:ring-red-500"
-          : "focus:ring-1 focus:ring-blue-500/40 focus:bg-slate-800/80"
-          }`}
-      />
+      <div className="relative w-full h-8">
+        {suggestion && suggestion.toLowerCase().startsWith(value.toLowerCase()) && value.length > 0 && (
+          <div className="absolute inset-0 px-[9px] flex items-center pointer-events-none text-slate-400 dark:text-slate-500 z-10 bg-transparent truncate text-sm">
+            <span className="opacity-0">{value}</span>
+            <span>{suggestion.slice(value.length)}</span>
+          </div>
+        )}
+        <Input
+          id={`cell-${identifier}-${column.id}`}
+          ref={inputRef}
+          value={value}
+          onChange={handleChange}
+          onBlur={onBlur}
+          onKeyDown={handleKeyDown}
+          className={`w-full h-full px-2 bg-slate-800/60 dark:bg-slate-800/40 border border-white/10 rounded-lg outline-none text-sm text-slate-100 placeholder:text-slate-500 transition-colors duration-100 ${error
+            ? "ring-1 ring-inset ring-red-500 bg-red-500/10 focus:ring-red-500"
+            : "focus:ring-1 focus:ring-blue-500/40 focus:bg-slate-800/80"
+            }`}
+        />
+      </div>
       <FieldError message={error} />
     </div>
   );

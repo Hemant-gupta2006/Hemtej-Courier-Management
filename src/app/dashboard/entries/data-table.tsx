@@ -170,7 +170,10 @@ export function DataTable<TData, TValue>({
     const fetchAutocomplete = async () => {
       try {
         const res = await fetch("/api/couriers/autocomplete");
-        if (res.ok) setAutocompleteData(await res.json());
+        if (res.ok) {
+          const json = await res.json();
+          setAutocompleteData(json.data || json);
+        }
       } catch (err) {
         console.error("Failed to fetch autocomplete", err);
       }
@@ -397,31 +400,14 @@ export function DataTable<TData, TValue>({
       return;
     }
 
-    // Generate tempId outside setData so we can return it for focus
     const tempId = `new-${Date.now()}-${Math.random()}`;
-
-    let nextChallan = "1001";
-    try {
-      const res = await fetch("/api/couriers/next-challan");
-      if (res.ok) {
-        const body = await res.json();
-        if (body.success && body.data?.nextChallanNo) {
-           nextChallan = String(body.data.nextChallanNo);
-        }
-      } else {
-        nextChallan = getNextChallan(dataRef.current);
-      }
-    } catch (err) {
-      console.error("Failed to fetch next challan:", err);
-      // Fallback
-      nextChallan = getNextChallan(dataRef.current);
-    }
+    // Zero-lag instant prediction to eliminate Vercel serverless cold starts
+    const nextChallan = getNextChallan(dataRef.current);
 
     setData((committed) => {
-      // Predict challan for visual UI feedback only. Backend enforces actual value later.
       const newRow = {
         ...createCleanRow(nextChallan),
-        tempId, // use the pre-generated tempId
+        tempId,
       };
       return [newRow, ...committed];
     });
@@ -443,70 +429,95 @@ export function DataTable<TData, TValue>({
       if (isSavingRef.current) return { success: false };
       isSavingRef.current = true;
 
-      try {
-        const currentData = dataRef.current;
-        const rowData = currentData.find(
-          (r) => (r.tempId && r.tempId === identifier) || (r.id && r.id === identifier)
-        );
-        if (!rowData) return { success: false };
-
-        const rowErrors = validateRow(rowData, currentData);
-        if (Object.keys(rowErrors).length > 0) {
-          setRowErrors(identifier, rowErrors);
-          toast.warning("Please fill all required fields before saving.");
-          return { success: false };
-        }
-        clearRowErrors(identifier);
-
-        const cleanedNew = {
-          ...rowData,
-          fromParty: capitalizeWords(rowData.fromParty || ""),
-          toParty: capitalizeWords(rowData.toParty || ""),
-          destination: capitalizeWords(rowData.destination || ""),
-          challanNo: String(rowData.challanNo).trim(),
-          amount: parseFloat(String(rowData.amount)) || 0,
-          tempId: undefined,
-          isNew: undefined,
-          isEdited: undefined,
-        };
-
-        const res = await fetch("/api/couriers", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(cleanedNew),
-        });
-
-        if (!res.ok) {
-          toast.error((await res.text()) || "Error saving row");
-          return { success: false };
-        }
-
-        const jsonBody = await res.json();
-        const saved = jsonBody.data || jsonBody;
-        toast.success("Row saved!");
-
-        const nextTempId = addNextRow ? `new-${Date.now()}-${Math.random()}` : undefined;
-
-        setData((committed) => {
-          const updated = committed.map((r) => {
-            if ((r.tempId && r.tempId === identifier) || (r.id && r.id === identifier)) {
-              return { ...r, id: saved.id, srNo: saved.srNo, isNew: false, tempId: undefined, isEdited: false };
-            }
-            return r;
-          });
-          if (!addNextRow || !nextTempId) return updated;
-          const nextChallan = String(Number(saved.challanNo) + 1);
-          const freshRow = { ...createCleanRow(nextChallan), tempId: nextTempId };
-          return [freshRow, ...updated];
-        });
-
-        clearRowErrors(identifier);
-        originalDataRef.current[saved.id] = { ...saved };
-
-        return { success: true, nextTempId };
-      } finally {
+      const currentData = dataRef.current;
+      const rowData = currentData.find(
+        (r) => (r.tempId && r.tempId === identifier) || (r.id && r.id === identifier)
+      );
+      if (!rowData) {
         isSavingRef.current = false;
+        return { success: false };
       }
+
+      const rowErrors = validateRow(rowData, currentData);
+      if (Object.keys(rowErrors).length > 0) {
+        setRowErrors(identifier, rowErrors);
+        toast.warning("Please fill all required fields before saving.");
+        isSavingRef.current = false;
+        return { success: false };
+      }
+      clearRowErrors(identifier);
+
+      const cleanedNew = {
+        ...rowData,
+        fromParty: capitalizeWords(rowData.fromParty || ""),
+        toParty: capitalizeWords(rowData.toParty || ""),
+        destination: capitalizeWords(rowData.destination || ""),
+        challanNo: String(rowData.challanNo).trim(),
+        amount: parseFloat(String(rowData.amount)) || 0,
+        tempId: undefined,
+        isNew: undefined,
+        isEdited: undefined,
+      };
+
+      // ── OPTIMISTIC UI: Instant visual update + spawn new row ──
+      const nextTempId = addNextRow ? `new-${Date.now()}-${Math.random()}` : undefined;
+      const predictedChallan = !isNaN(Number(rowData.challanNo))
+        ? String(Number(rowData.challanNo) + 1)
+        : getNextChallan(currentData);
+
+      setData((committed) => {
+        let updated = committed.map((r) => {
+          if ((r.tempId && r.tempId === identifier) || (r.id && r.id === identifier)) {
+            // Fake that it's saved to unblock UI interaction instantly
+            return { ...r, isNew: false, tempId: r.tempId || identifier, isEdited: false };
+          }
+          return r;
+        });
+
+        if (addNextRow && nextTempId) {
+          const freshRow = { ...createCleanRow(predictedChallan), tempId: nextTempId };
+          return [freshRow, ...updated];
+        }
+        return updated;
+      });
+
+      // Release guard lock early so they can save the *next* row instantly
+      setTimeout(() => { isSavingRef.current = false; }, 50);
+
+      // ── BACKGROUND SAVE ──
+      (async () => {
+        try {
+          const res = await fetch("/api/couriers", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(cleanedNew),
+          });
+
+          if (!res.ok) {
+            toast.error((await res.text()) || "Error saving row");
+            return;
+          }
+
+          const jsonBody = await res.json();
+          const saved = jsonBody.data || jsonBody;
+
+          setData((committed) =>
+            committed.map((r) => {
+              if (r.tempId === identifier || r.id === identifier) {
+                // Apply final real backend DB row values silently
+                return { ...r, id: saved.id, srNo: saved.srNo, challanNo: String(saved.challanNo), tempId: undefined };
+              }
+              return r;
+            })
+          );
+          originalDataRef.current[saved.id] = { ...saved };
+        } catch (err) {
+          toast.error("Network error while saving");
+        }
+      })();
+
+      // Return instantly to UI for rapid auto-focusing without waiting for the server
+      return { success: true, nextTempId };
     },
     [createCleanRow, getNextChallan, setRowErrors, clearRowErrors]
   );
@@ -663,10 +674,22 @@ export function DataTable<TData, TValue>({
 
   const formatExportWeight = (w: string) => {
     if (!w) return "";
-    const lower = w.toLowerCase().trim();
-    if (lower.includes("kg")) return lower.replace(/\s+/g, "");
-    const n = parseFloat(lower);
-    return !isNaN(n) ? `${(n / 1000).toFixed(3)}gm` : lower;
+    const lower = String(w).toLowerCase().trim();
+    
+    if (lower.includes("kg")) {
+      const num = parseFloat(lower);
+      return !isNaN(num) ? `${num} kg` : lower.replace(/\s+/g, "");
+    }
+    
+    const g = parseFloat(lower);
+    if (isNaN(g)) return lower;
+    
+    if (g >= 1000) {
+      return `${Number((g / 1000).toFixed(3))} kg`;
+    }
+    
+    // Reverted logic for grams to original format
+    return `${(g / 1000).toFixed(3)}gm`;
   };
 
   const exportExcel = () => {
@@ -852,8 +875,8 @@ export function DataTable<TData, TValue>({
           </Button>
           {mode !== "all" && (
             <Button
-              onClick={() => {
-                const tempId = addEmptyRow();
+              onClick={async () => {
+                const tempId = await addEmptyRow();
                 if (tempId) {
                   // Focus the fromParty field of the new row after DOM settles
                   setTimeout(() => {
