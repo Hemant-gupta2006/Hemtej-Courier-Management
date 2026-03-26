@@ -47,8 +47,12 @@ export async function GET() {
         statuses
       }
     });
-  } catch (error) {
-    console.error("[AUTOCOMPLETE_GET]", userId, error);
+  } catch (error: any) {
+    if (error?.code === 'P1001' || error?.code === 'P2024') {
+      console.warn(`[AUTOCOMPLETE_GET] Database connection issue (${error.code}) for user ${userId}.`);
+    } else {
+      console.error("[AUTOCOMPLETE_GET]", userId, error);
+    }
     return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
   }
 }

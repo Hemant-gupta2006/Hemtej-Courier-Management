@@ -252,8 +252,8 @@ export default function CourierEntryPage() {
 // ── Mobile entry card (read-only view of saved entries) ──
 const MobileEntryCard = memo(function MobileEntryCard({ entry }: { entry: any }) {
   const statusColor: Record<string, string> = {
-    Cash: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
     Account: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+    Cash: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
   };
 
   const fmt = (w: string) => {

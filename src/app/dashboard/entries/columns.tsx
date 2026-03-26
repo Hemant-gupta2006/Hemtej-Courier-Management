@@ -38,7 +38,7 @@ declare module "@tanstack/react-table" {
 const FieldError = ({ message }: { message?: string }) => {
   if (!message) return null;
   return (
-    <span className="absolute bottom-0 right-2 text-[10px] text-red-500 font-medium z-20 pointer-events-none">
+    <span className="absolute bottom-1.5 right-2 text-[10px] text-red-500 font-medium z-20 pointer-events-none">
       {message}
     </span>
   );
@@ -160,7 +160,7 @@ const EditableCell = ({ getValue, row, column, table }: any) => {
   if (column.id === "status" || column.id === "mode") {
     const options =
       column.id === "status"
-        ? ["Cash", "Account"]
+        ? ["Account", "Cash"]
         : ["Surface", "Air", "Cargo", "V Fast"];
     return (
       <div className="h-10 w-full flex items-center px-1 relative overflow-hidden">
@@ -311,8 +311,8 @@ const WeightCell = ({ getValue, row, column, table }: any) => {
           <SelectValue />
         </SelectTrigger>
         <SelectContent className="rounded-lg shadow-lg">
-          <SelectItem value="kg" className="rounded-md">kg</SelectItem>
           <SelectItem value="g" className="rounded-md">g</SelectItem>
+          <SelectItem value="kg" className="rounded-md">kg</SelectItem>
         </SelectContent>
       </Select>
       <FieldError message={error} />
@@ -417,8 +417,9 @@ export const columns: ColumnDef<CourierEntry>[] = [
             {/* 💾 SAVE BUTTON */}
             <Button
               id={`save-btn-${identifier}`}
-              size="sm"
+              size="icon"
               disabled={hasErrors}
+              title={isNew ? "Save" : "Update"}
               onClick={async () => {
                 if (isNew) {
                   const res = await table.options.meta?.saveNewRow(identifier, true);
@@ -431,13 +432,12 @@ export const columns: ColumnDef<CourierEntry>[] = [
                   table.options.meta?.saveEditedRow(identifier);
                 }
               }}
-              className={`h-8 w-[60px] rounded-lg text-xs px-1 flex items-center justify-center transition-transform hover:scale-[1.02] active:scale-[0.98] shrink-0 ${hasErrors
+              className={`h-8 w-[40px] rounded-lg text-xs flex items-center justify-center transition-transform hover:scale-[1.02] active:scale-[0.98] shrink-0 ${hasErrors
                 ? "bg-transparent text-slate-500 cursor-not-allowed"
                 : "bg-blue-600 hover:bg-blue-700 text-white"
                 }`}
             >
-              <Save className="h-3 w-3 mr-[2px]" />
-              {isNew ? "Save" : "Upd"}
+              <Save className="h-4 w-4" />
             </Button>
           </div>
         );

@@ -151,7 +151,7 @@ export function DataTable<TData, TValue>({
     destination: "",
     weightNum: "100",
     weightUnit: "g",
-    status: "Cash",
+    status: "Account",
     mode: "Surface",
   });
   const [useBatchDefaults, setUseBatchDefaults] = React.useState(true);
@@ -248,11 +248,11 @@ export function DataTable<TData, TValue>({
         .replace(/g|kg/gi, "")
         .trim();
       if (n !== "" && isNaN(Number(n)))
-        return "Weight must be numeric. Only numbers allowed.";
+        return "Must be numeric";
     }
     if (columnId === "amount") {
       const v = String(value ?? "").trim();
-      if (v !== "" && isNaN(Number(v))) return "Invalid amount. Only numbers are allowed.";
+      if (v !== "" && isNaN(Number(v))) return "Invalid amount";
     }
     if (columnId === "challanNo") {
       const c = String(value ?? "").trim();
@@ -266,7 +266,7 @@ export function DataTable<TData, TValue>({
           return String(r.challanNo ?? "").trim() === c;
         });
         if (dup)
-          return "This challan number already exists. Please enter a unique number.";
+          return "Duplicate challan";
       }
     }
     return "";
@@ -275,10 +275,10 @@ export function DataTable<TData, TValue>({
   const validateRow = (row: any, allData: any[]): Record<string, string> => {
     const errs: Record<string, string> = {};
     const id = row.tempId || row.id;
-    if (!row.isNew && !String(row.challanNo ?? "").trim()) errs.challanNo = "Challan Number is required.";
-    if (!String(row.fromParty ?? "").trim()) errs.fromParty = "From Party is required.";
-    if (!String(row.toParty ?? "").trim()) errs.toParty = "To Party is required.";
-    if (!String(row.destination ?? "").trim()) errs.destination = "Destination is required.";
+    if (!row.isNew && !String(row.challanNo ?? "").trim()) errs.challanNo = "Required";
+    if (!String(row.fromParty ?? "").trim()) errs.fromParty = "Required";
+    if (!String(row.toParty ?? "").trim()) errs.toParty = "Required";
+    if (!String(row.destination ?? "").trim()) errs.destination = "Required";
 
     ["weight", "amount", "challanNo"].forEach((col) => {
       if (!errs[col]) {
@@ -330,6 +330,7 @@ export function DataTable<TData, TValue>({
   const deleteRow = React.useCallback(
     async (id: string, identifier: string) => {
       if (!id) {
+        clearRowErrors(identifier);
         setData((old) => old.filter((r) => (r.tempId || r.id) !== identifier));
         return;
       }
@@ -337,6 +338,7 @@ export function DataTable<TData, TValue>({
       try {
         const res = await fetch(`/api/couriers/${id}`, { method: "DELETE" });
         if (res.ok) {
+          clearRowErrors(identifier);
           toast.success("Deleted");
           setData((old) => old.filter((r) => r.id !== id));
           router.refresh();
@@ -345,7 +347,7 @@ export function DataTable<TData, TValue>({
         toast.error("Network error");
       }
     },
-    [router]
+    [router, clearRowErrors]
   );
 
   // ─────────────────────────────────────────────
@@ -371,7 +373,7 @@ export function DataTable<TData, TValue>({
       : "100g",
     destination: useBatchDefaults ? batchDefaults.destination : "",
     amount: "",
-    status: useBatchDefaults ? batchDefaults.status : "Cash",
+    status: useBatchDefaults ? batchDefaults.status : "Account",
     mode: useBatchDefaults ? batchDefaults.mode : "Surface",
     isNew: true,
   }), [useBatchDefaults, batchDefaults]);
@@ -762,8 +764,8 @@ export function DataTable<TData, TValue>({
                   }
                   className="bg-transparent px-2 outline-none border-l border-white/30 dark:border-white/10 text-slate-700 dark:text-slate-300 cursor-pointer"
                 >
-                  <option value="g">g</option>
                   <option value="kg">kg</option>
+                  <option value="g">g</option>
                 </select>
               </div>
             </div>
@@ -771,13 +773,13 @@ export function DataTable<TData, TValue>({
               <Label className="text-slate-600 dark:text-slate-300">Status</Label>
               <Select
                 value={batchDefaults.status}
-                onValueChange={(v) => setBatchDefaults({ ...batchDefaults, status: v || "Cash" })}
+                onValueChange={(v) => setBatchDefaults({ ...batchDefaults, status: v || "Account" })}
               >
                 <SelectTrigger className="w-full bg-white/50 dark:bg-slate-800/50 border-white/30 dark:border-white/10 shadow-sm rounded-none">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {["Cash", "Account"].map((o) => (
+                  {["Account", "Cash"].map((o) => (
                     <SelectItem key={o} value={o}>{o}</SelectItem>
                   ))}
                 </SelectContent>
@@ -817,7 +819,7 @@ export function DataTable<TData, TValue>({
                   destination: "",
                   weightNum: "100",
                   weightUnit: "g",
-                  status: "Cash",
+                  status: "Account",
                   mode: "Surface",
                 })
               }

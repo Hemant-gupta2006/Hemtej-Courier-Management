@@ -203,7 +203,7 @@ export function MobileEntryForm({
     weightUnit: "g",
     destination: "",
     amount: "",
-    status: "Cash",
+    status: "Account",
     mode: "Surface",
   });
 

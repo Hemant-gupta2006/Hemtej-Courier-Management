@@ -52,8 +52,12 @@ export async function GET(req: Request) {
       page,
       totalPages
     });
-  } catch (error) {
-    console.error("[COURIERS_GET]", userId, error);
+  } catch (error: any) {
+    if (error?.code === 'P1001' || error?.code === 'P2024') {
+      console.warn(`[COURIERS_GET] Database connection issue (${error.code}) for user ${userId}. Retrying usually works.`);
+    } else {
+      console.error("[COURIERS_GET]", userId, error);
+    }
     return NextResponse.json({ success: false, data: [], error: "Internal server error" }, { status: 500 });
   }
 }
@@ -147,10 +151,13 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true, data: courier });
   } catch (error: any) {
-    if (error.message === "DUPLICATE_CHALLAN_USER_PROVIDED") {
+    if (error?.message === "DUPLICATE_CHALLAN_USER_PROVIDED") {
       return NextResponse.json({ success: false, error: "This challan number already exists." }, { status: 400 });
+    } else if (error?.code === 'P1001' || error?.code === 'P2024') {
+      console.warn(`[COURIERS_POST] Database connection issue (${error.code}) for user ${userId}. Retrying usually works.`);
+    } else {
+      console.error("[COURIERS_POST]", userId, error);
     }
-    console.error("[COURIERS_POST]", userId, error);
     return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
   }
 }
