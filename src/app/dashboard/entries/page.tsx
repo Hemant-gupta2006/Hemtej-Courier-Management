@@ -98,6 +98,7 @@ export default function CourierEntryPage() {
   const router = useRouter();
 
   const [entries, setEntries] = useState<any[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [autocompleteData, setAutocompleteData] = useState<{
     fromParties: string[];
@@ -119,6 +120,7 @@ export default function CourierEntryPage() {
     if (entRes.ok) {
       const json = await entRes.json();
       setEntries(Array.isArray(json) ? json : (json.data || []));
+      setTotalCount(json.total || (Array.isArray(json) ? json.length : 0));
     }
     if (acRes.ok) {
       const json = await acRes.json();
@@ -183,6 +185,9 @@ export default function CourierEntryPage() {
                 <DataTable 
                   columns={columns} 
                   data={visibleData} 
+                  totalCount={totalCount}
+                  pageIndex={0}
+                  pageSize={20}
                   onExportExcel={() => window.open(`/api/couriers/export`)}
                 />
               </div>

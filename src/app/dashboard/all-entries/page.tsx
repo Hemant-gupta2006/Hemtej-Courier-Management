@@ -14,6 +14,7 @@ export default function AllEntriesPage() {
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
   const limit = 50;
 
   const [searchValue, setSearchValue] = useState("");
@@ -89,11 +90,14 @@ export default function AllEntriesPage() {
           const start = (page - 1) * limit;
           setEntries(result.slice(start, start + limit));
           setTotalPages(total);
+          setTotalCount(result.length);
         } else {
           // Use real backend pagination if available
           setEntries(result.data || []);
           setTotalPages(result.totalPages || 1);
+          setTotalCount(result.total || 0);
         }
+
       } else {
         const errDetails = await res.json().catch(() => null);
         toast.error(errDetails?.error || "Failed to load entries.");
@@ -146,6 +150,9 @@ export default function AllEntriesPage() {
                 <DataTable 
                   columns={columns} 
                   data={memoData} 
+                  totalCount={totalCount}
+                  pageIndex={page - 1}
+                  pageSize={limit}
                   mode="all"
                   searchValue={searchValue}
                   onSearchChange={setSearchValue}

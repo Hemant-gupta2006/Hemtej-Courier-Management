@@ -41,6 +41,9 @@ import { Label } from "@/components/ui/label";
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
+  totalCount?: number;
+  pageIndex?: number;
+  pageSize?: number;
   /** When true, only visible rows are rendered — essential for 100+ rows. */
   virtualize?: boolean;
   /** Height of the virtualised scroll container. Default: "560px" */
@@ -146,6 +149,9 @@ export function DataTable<TData, TValue>({
   onClearStatus,
   onClearAll,
   onExportExcel,
+  totalCount,
+  pageIndex = 0,
+  pageSize,
 }: DataTableProps<TData, TValue>) {
   const router = useRouter();
   // Ref for the virtualised scroll container (also used in non-virtual mode, harmlessly)
@@ -413,7 +419,7 @@ export function DataTable<TData, TValue>({
   const getNextChallan = React.useCallback((d: any[]): string => {
     const validRows = d.filter((r) => !r.isNew && String(r.challanNo).toLowerCase() !== "auto");
     if (validRows.length === 0) return "1001";
-    
+
     // d is already sorted newest-first, so the first valid row is the most recently created.
     const lastChallan = Number(validRows[0].challanNo);
     return !isNaN(lastChallan) && lastChallan > 0 ? String(lastChallan + 1) : "1001";
@@ -649,8 +655,6 @@ export function DataTable<TData, TValue>({
   // Table instance
   // ─────────────────────────────────────────────
 
-  // tableMeta is stable — errorsVersion intentionally excluded.
-  // Cells read errors via errorsRef; MemoizedRow re-renders per row via rowErrorVersions.
   const tableMeta = React.useMemo(
     () => ({
       updateData,
@@ -664,16 +668,20 @@ export function DataTable<TData, TValue>({
       mode,
       filterProps: {
         startDate: startDate || "",
-        onStartDateChange: onStartDateChange || (() => {}),
+        onStartDateChange: onStartDateChange || (() => { }),
         endDate: endDate || "",
-        onEndDateChange: onEndDateChange || (() => {}),
+        onEndDateChange: onEndDateChange || (() => { }),
         statusFilter: statusFilter || "all",
-        onStatusFilterChange: onStatusFilterChange || (() => {}),
-        onApplyFilters: onApplyFilters || (() => {}),
-        onApplyStatusFilter: onApplyStatusFilter || (() => {}),
-      }
+        onStatusFilterChange: onStatusFilterChange || (() => { }),
+        onApplyFilters: onApplyFilters || (() => { }),
+        onApplyStatusFilter: onApplyStatusFilter || (() => { }),
+      },
+      pageIndex,
+      pageSize: pageSize || dataRef.current.length,
+      totalCount: totalCount !== undefined ? totalCount : dataRef.current.length,
+      localRowOffset: data.length - (initialData?.length || 0),
     }),
-    [updateData, deleteRow, autocompleteData, handleCellKeyDown, clearFieldError, saveNewRow, saveEditedRow, mode, startDate, onStartDateChange, endDate, onEndDateChange, statusFilter, onStatusFilterChange, onApplyFilters, onApplyStatusFilter]
+    [updateData, deleteRow, autocompleteData, handleCellKeyDown, clearFieldError, saveNewRow, saveEditedRow, mode, startDate, onStartDateChange, endDate, onEndDateChange, statusFilter, onStatusFilterChange, onApplyFilters, onApplyStatusFilter, pageIndex, pageSize, totalCount, data.length, initialData?.length]
   );
 
   const table = useReactTable({
@@ -714,19 +722,19 @@ export function DataTable<TData, TValue>({
   const formatExportWeight = (w: string) => {
     if (!w) return "";
     const lower = String(w).toLowerCase().trim();
-    
+
     if (lower.includes("kg")) {
       const num = parseFloat(lower);
       return !isNaN(num) ? `${num} kg` : lower.replace(/\s+/g, "");
     }
-    
+
     const g = parseFloat(lower);
     if (isNaN(g)) return lower;
-    
+
     if (g >= 1000) {
       return `${Number((g / 1000).toFixed(3))} kg`;
     }
-    
+
     // Reverted logic for grams to original format
     return `${(g / 1000).toFixed(3)}gm`;
   };
@@ -910,8 +918,8 @@ export function DataTable<TData, TValue>({
                     <button onClick={onClearStatus} className="hover:bg-purple-500/20 rounded-full p-0.5 transition-colors"><X className="w-3 h-3" /></button>
                   </div>
                 )}
-                <button 
-                  onClick={onClearAll} 
+                <button
+                  onClick={onClearAll}
                   className="text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors ml-1"
                 >
                   Clear All

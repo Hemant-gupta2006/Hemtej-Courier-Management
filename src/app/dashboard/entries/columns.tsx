@@ -340,11 +340,42 @@ export const columns: ColumnDef<CourierEntry>[] = [
     accessorKey: "srNo",
     header: "Sr.No",
     size: 45,
-    cell: ({ row }) => {
-      const val = row.getValue("srNo") as number | string;
+    cell: ({ row, table }) => {
+      // 1. Get all currently visible rows and identify this row's position
+      const visibleRows = table.getSortedRowModel().flatRows;
+      const rowIndex = visibleRows.findIndex((r) => r.id === row.id);
+      
+      // 2. Retrieve pagination and offset data gracefully passed from DataTable
+      const meta = table.options.meta as any;
+      const pageIndex = meta?.pageIndex ?? 0;
+      const pageSize = meta?.pageSize ?? (visibleRows.length > 0 ? visibleRows.length : 50);
+      
+      // Obtain static Count from backend and offset it by any local (optimistic/deleted) modifiers
+      const staticTotalCount = meta?.totalCount ?? 0;
+      const localRowOffset = meta?.localRowOffset ?? 0;
+      const trueTotalCount = staticTotalCount + localRowOffset;
+
+      // 3. Calculate exactly what the Serial Number should be
+      const isDesc = table.getState().sorting.some((s) => s.desc);
+      let displayNo = 0;
+
+      if (isDesc) {
+        // Since we explicitly expanded trueTotalCount using localRowOffset, newly added
+        // rows mathematically sit proportionally "above" the backend's max value 
+        // without disturbing the absolute index mapping of the previous rows below.
+        const globalOrdinalIndex = (pageIndex * pageSize) + rowIndex;
+        displayNo = trueTotalCount - globalOrdinalIndex;
+      } else {
+        const globalOrdinalIndex = (pageIndex * pageSize) + rowIndex;
+        displayNo = globalOrdinalIndex + 1;
+      }
+
+      // Safeguard against NaN/negative
+      const finalDisplay = !isNaN(displayNo) && displayNo > 0 ? displayNo : "-";
+
       return (
         <div className="h-10 w-full flex items-center px-1 text-sm text-slate-300 truncate overflow-hidden whitespace-nowrap">
-          {val === 999999999 ? "NEW" : val || "-"}
+          {finalDisplay}
         </div>
       );
     },
