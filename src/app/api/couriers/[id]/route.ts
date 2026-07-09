@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { recordActivity } from "@/lib/activityLog";
 
 export async function PATCH(
   req: Request,
@@ -40,6 +41,16 @@ export async function PATCH(
       return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
     }
 
+    // Check if the current register is locked/archived
+    if (dbEntry.registerId) {
+      const register = await prisma.courierRegister.findUnique({
+        where: { id: dbEntry.registerId }
+      });
+      if (register && (register.status === "Locked" || register.status === "Archived")) {
+        return NextResponse.json({ success: false, error: `This register is ${register.status.toLowerCase()} and cannot be modified.` }, { status: 400 });
+      }
+    }
+
     if (body.challanNo !== undefined) {
       const parsedChallan = parseInt(body.challanNo, 10);
       if (!isNaN(parsedChallan)) {
@@ -53,7 +64,32 @@ export async function PATCH(
     }
 
     const data: any = {};
-    if (body.date !== undefined) data.date = isNaN(Date.parse(body.date)) ? new Date() : new Date(body.date);
+    if (body.date !== undefined) {
+      const newDate = isNaN(Date.parse(body.date)) ? new Date() : new Date(body.date);
+
+      // If register exists, validate date matches register month/year
+      if (dbEntry.registerId) {
+        const register = await prisma.courierRegister.findUnique({
+          where: { id: dbEntry.registerId }
+        });
+        if (register) {
+          const newMonth = newDate.getMonth() + 1;
+          const newYear = newDate.getFullYear();
+          if (newMonth !== register.month || newYear !== register.year) {
+            const monthNames = [
+              "January", "February", "March", "April", "May", "June",
+              "July", "August", "September", "October", "November", "December"
+            ];
+            return NextResponse.json({
+              success: false,
+              error: `Entry date must match the register's month and year (${monthNames[register.month - 1]} ${register.year}).`
+            }, { status: 400 });
+          }
+        }
+      }
+      data.date = newDate;
+    }
+
     if (body.fromParty !== undefined) data.fromParty = String(body.fromParty).trim();
     if (body.toParty !== undefined) data.toParty = String(body.toParty).trim();
     if (body.weightValue !== undefined) data.weightValue = Number(body.weightValue) || 0;
@@ -81,6 +117,18 @@ export async function PATCH(
     const courier = await prisma.courierEntry.update({
       where: { id: resolvedParams.id },
       data
+    });
+
+    await recordActivity({
+      userId: String((session.user as any).id),
+      userName: session.user.name || session.user.email || "Staff",
+      role: (session.user as any).role || "Staff",
+      action: "COURIER_EDIT",
+      entity: "CourierEntry",
+      entityId: courier.id,
+      oldValue: JSON.stringify(dbEntry),
+      newValue: JSON.stringify(courier),
+      req
     });
 
     return NextResponse.json({ success: true, data: courier });
@@ -121,8 +169,30 @@ export async function DELETE(
       return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
     }
 
+    // Check if the current register is locked/archived
+    if (dbEntry.registerId) {
+      const register = await prisma.courierRegister.findUnique({
+        where: { id: dbEntry.registerId }
+      });
+      if (register && (register.status === "Locked" || register.status === "Archived")) {
+        return NextResponse.json({ success: false, error: `This register is ${register.status.toLowerCase()} and cannot be modified.` }, { status: 400 });
+      }
+    }
+
     const courier = await prisma.courierEntry.delete({
       where: { id: resolvedParams.id }
+    });
+
+    await recordActivity({
+      userId: String((session.user as any).id),
+      userName: session.user.name || session.user.email || "Staff",
+      role: (session.user as any).role || "Staff",
+      action: "COURIER_DELETE",
+      entity: "CourierEntry",
+      entityId: courier.id,
+      oldValue: JSON.stringify(dbEntry),
+      newValue: null,
+      req
     });
 
     return NextResponse.json({ success: true, data: courier });
@@ -131,3 +201,6 @@ export async function DELETE(
     return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
   }
 }
+
+export const PUT = PATCH;
+

@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { CourierEntry } from "@prisma/client";
 import { Trash2, Save, Filter } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -20,17 +20,19 @@ declare module "@tanstack/react-table" {
     updateData: (identifier: string, columnId: string, value: unknown) => void;
     deleteRow: (id: string, identifier: string) => void;
     saveNewRow: (identifier: string, addNextRow?: boolean) => Promise<{ success: boolean; nextTempId?: string }>;
-    saveEditedRow: (identifier: string) => void;
+    saveEditedRow: (identifier: string) => Promise<boolean>;
     autocompleteData: any;
     handleCellKeyDown: (
       e: React.KeyboardEvent<HTMLInputElement>,
       identifier: string,
       columnId: string,
-      inputElement: HTMLInputElement | null
+      inputElement: HTMLInputElement | null,
+      table?: any
     ) => void;
     errorsRef?: React.MutableRefObject<Record<string, Record<string, string>>>;
     clearFieldError?: (identifier: string, columnId: string) => void;
     mode?: "entry" | "all";
+    activeRegister?: any;
     filterProps?: {
       startDate: string;
       onStartDateChange: (val: string) => void;
@@ -55,8 +57,6 @@ const FieldError = ({ message }: { message?: string }) => {
     </span>
   );
 };
-
-// ───────────────────────────────────────────
 // AutocompleteCell — fromParty, toParty, destination
 // ───────────────────────────────────────────
 const AutocompleteCell = ({ getValue, row, column, table }: any) => {
@@ -66,49 +66,58 @@ const AutocompleteCell = ({ getValue, row, column, table }: any) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const identifier: string = row.original.tempId || row.original.id;
-  // Map column IDs to the correct autocomplete API key
+  const autocompleteData = table.options.meta?.autocompleteData || {};
   const acKeyMap: Record<string, string> = {
     fromParty: "fromParties",
     toParty: "toParties",
     destination: "destinations",
   };
   const acKey = acKeyMap[column.id] ?? `${column.id}s`;
-  const acData: string[] = table.options.meta?.autocompleteData?.[acKey] ?? [];
-  // Read errors from ref for zero-lag rendering (ref never triggers re-render)
+  const acData: string[] = autocompleteData[acKey] ?? [];
   const error: string | undefined = table.options.meta?.errorsRef?.current?.[identifier]?.[column.id];
+  const activeRegister = table.options.meta?.activeRegister;
+  const isReadOnly = activeRegister?.status === "Locked" || activeRegister?.status === "Archived";
 
-  // Only re-sync when the row identity changes (prevents cross-row leakage)
+  const acDataObjects = useMemo(() => {
+    return acData.map((item: string) => ({
+      original: item,
+      lower: item.toLowerCase()
+    }));
+  }, [acData]);
+
+  const parentVal = String(getValue() ?? "");
   useEffect(() => {
-    setValue(String(getValue() ?? ""));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [row.original.tempId, row.original.id]);
+    setValue(parentVal);
+  }, [parentVal]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Apply live auto-capitalization for party/destination fields
+    if (isReadOnly) return;
     const raw = e.target.value;
     const capitalizeFields = ["fromParty", "toParty", "destination"];
     const val = capitalizeFields.includes(column.id)
       ? raw
         .split(" ")
-        .map((w, i, arr) =>
-          // Only capitalize the last word-in-progress if cursor is at end
-          w.length === 0 ? w : w.charAt(0).toUpperCase() + w.slice(1)
-        )
+        .map((w) => (w.length === 0 ? w : w.charAt(0).toUpperCase() + w.slice(1)))
         .join(" ")
       : raw;
     setValue(val);
     if (error) table.options.meta?.clearFieldError?.(identifier, column.id);
-    setSuggestion(
-      val.length > 0
-        ? (acData.find((i) => i.toLowerCase().startsWith(val.toLowerCase())) ?? "")
-        : ""
-    );
+
+    if (val.length > 0) {
+      const lowerVal = val.toLowerCase();
+      const found = acDataObjects.find((i) => i.lower.startsWith(lowerVal));
+      setSuggestion(found ? found.original : "");
+    } else {
+      setSuggestion("");
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (isReadOnly) return;
     if (e.key === "Tab" && suggestion && suggestion.toLowerCase() !== value.toLowerCase()) {
       e.preventDefault();
       setValue(suggestion);
+      table.options.meta?.updateData(identifier, column.id, suggestion);
       setSuggestion("");
     } else {
       table.options.meta?.handleCellKeyDown(e, identifier, column.id, inputRef.current);
@@ -116,6 +125,7 @@ const AutocompleteCell = ({ getValue, row, column, table }: any) => {
   };
 
   const onBlur = () => {
+    if (isReadOnly) return;
     table.options.meta?.updateData(identifier, column.id, value);
     setSuggestion("");
   };
@@ -123,7 +133,7 @@ const AutocompleteCell = ({ getValue, row, column, table }: any) => {
   return (
     <div className="h-10 w-full flex items-center px-1 relative overflow-hidden">
       <div className="relative w-full h-8">
-        {suggestion && suggestion.toLowerCase().startsWith(value.toLowerCase()) && value.length > 0 && (
+        {suggestion && value.length > 0 && (
           <div className="absolute inset-0 px-[9px] flex items-center pointer-events-none text-slate-400 dark:text-slate-500 z-10 bg-transparent truncate text-sm">
             <span className="opacity-0">{value}</span>
             <span>{suggestion.slice(value.length)}</span>
@@ -133,10 +143,11 @@ const AutocompleteCell = ({ getValue, row, column, table }: any) => {
           id={`cell-${identifier}-${column.id}`}
           ref={inputRef}
           value={value}
+          disabled={isReadOnly}
           onChange={handleChange}
           onBlur={onBlur}
           onKeyDown={handleKeyDown}
-          className={`w-full h-full px-2 bg-slate-800/60 dark:bg-slate-800/40 border border-white/10 rounded-lg outline-none text-sm text-slate-100 placeholder:text-slate-500 transition-colors duration-100 ${error
+          className={`w-full h-full px-2 bg-slate-800/60 dark:bg-slate-800/40 border border-white/10 rounded-lg outline-none text-sm text-slate-100 placeholder:text-slate-500 transition-colors duration-100 disabled:opacity-50 disabled:cursor-not-allowed ${error
             ? "ring-1 ring-inset ring-red-500 bg-red-500/10 focus:ring-red-500"
             : "focus:ring-1 focus:ring-blue-500/40 focus:bg-slate-800/80"
             }`}
@@ -156,17 +167,29 @@ const EditableCell = ({ getValue, row, column, table }: any) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const identifier: string = row.original.tempId || row.original.id;
-  // Read errors from ref for zero-lag rendering (ref never triggers re-render)
   const error: string | undefined = table.options.meta?.errorsRef?.current?.[identifier]?.[column.id];
+  const activeRegister = table.options.meta?.activeRegister;
+  const isReadOnly = activeRegister?.status === "Locked" || activeRegister?.status === "Archived";
 
+  const parentVal = String(getValue() ?? "");
   useEffect(() => {
-    setValue(String(getValue() ?? ""));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [row.original.tempId, row.original.id]);
+    setValue(parentVal);
+  }, [parentVal]);
 
-  const onBlur = () => table.options.meta?.updateData(identifier, column.id, value);
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) =>
-    table.options.meta?.handleCellKeyDown(e, identifier, column.id, inputRef.current);
+  const onBlur = () => {
+    if (isReadOnly) return;
+    const valToSave = column.id === "amount" || column.id === "challanNo" ? (parseFloat(value) || 0) : value;
+    table.options.meta?.updateData(identifier, column.id, valToSave);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (isReadOnly) return;
+    if (e.key === "Enter") {
+      const valToSave = column.id === "amount" || column.id === "challanNo" ? (parseFloat(value) || 0) : value;
+      table.options.meta?.updateData(identifier, column.id, valToSave);
+    }
+    table.options.meta?.handleCellKeyDown(e, identifier, column.id, inputRef.current, table);
+  };
 
   // ── Select (status / mode) ──
   if (column.id === "status" || column.id === "mode") {
@@ -177,19 +200,24 @@ const EditableCell = ({ getValue, row, column, table }: any) => {
     return (
       <div className="h-10 w-full flex items-center px-1 relative overflow-hidden">
         <Select
+          disabled={isReadOnly}
           value={String(value)}
           onValueChange={(v) => {
+            if (isReadOnly) return;
             setValue(v ?? "");
             table.options.meta?.updateData(identifier, column.id, v ?? "");
+            if (error) table.options.meta?.clearFieldError?.(identifier, column.id);
           }}
         >
           <SelectTrigger
             id={`cell-${identifier}-${column.id}`}
             ref={inputRef as any}
-            className={`w-full h-8 px-2 bg-slate-800/60 dark:bg-slate-800/40 border border-white/10 rounded-lg appearance-none text-sm text-slate-100 hover:bg-slate-800/80 focus:ring-1 focus:ring-blue-500/40 focus:bg-slate-800/80 focus-visible:ring-offset-0`}
+            className={`w-full h-8 px-2 bg-slate-800/60 dark:bg-slate-800/40 border border-white/10 rounded-lg appearance-none text-sm text-slate-100 hover:bg-slate-800/80 focus:ring-1 focus:ring-blue-500/40 focus:bg-slate-800/80 focus-visible:ring-offset-0 disabled:opacity-50 disabled:cursor-not-allowed ${error
+              ? "ring-1 ring-inset ring-red-500 bg-red-500/10 focus:ring-red-500"
+              : ""
+              }`}
             onKeyDown={(e: React.KeyboardEvent<any>) => {
-              if (e.key === "Tab")
-                table.options.meta?.handleCellKeyDown(e as any, identifier, column.id, inputRef.current);
+              table.options.meta?.handleCellKeyDown(e as any, identifier, column.id, inputRef.current, table);
             }}
           >
             <SelectValue placeholder="Select" />
@@ -200,24 +228,46 @@ const EditableCell = ({ getValue, row, column, table }: any) => {
             ))}
           </SelectContent>
         </Select>
+        <FieldError message={error} />
       </div>
     );
   }
 
   // ── Date ──
   if (column.id === "date") {
+    let minMaxProps: { min?: string; max?: string } = {};
+    if (activeRegister) {
+      const { month, year } = activeRegister;
+      const pad = (num: number) => String(num).padStart(2, '0');
+      const minDate = `${year}-${pad(month)}-01`;
+      const lastDay = new Date(year, month, 0).getDate();
+      const maxDate = `${year}-${pad(month)}-${pad(lastDay)}`;
+      minMaxProps = { min: minDate, max: maxDate };
+    }
+
     return (
       <div className="h-10 w-full flex items-center px-1 relative overflow-hidden">
         <Input
           id={`cell-${identifier}-${column.id}`}
           ref={inputRef}
           type="date"
+          disabled={isReadOnly}
           value={value ? new Date(value).toISOString().split("T")[0] : ""}
-          onChange={(e) => setValue(e.target.value)}
+          onChange={(e) => {
+            if (isReadOnly) return;
+            const val = e.target.value;
+            setValue(val);
+            if (error) table.options.meta?.clearFieldError?.(identifier, column.id);
+          }}
           onBlur={onBlur}
           onKeyDown={handleKeyDown}
-          className={`w-full h-8 px-2 bg-slate-800/60 dark:bg-slate-800/40 border border-white/10 rounded-lg outline-none text-sm text-slate-100 placeholder:text-slate-500 transition-colors duration-100 focus:ring-1 focus:ring-blue-500/40 focus:bg-slate-800/80`}
+          className={`w-full h-8 px-2 bg-slate-800/60 dark:bg-slate-800/40 border border-white/10 rounded-lg outline-none text-sm text-slate-100 placeholder:text-slate-500 transition-colors duration-100 disabled:opacity-50 disabled:cursor-not-allowed ${error
+            ? "ring-1 ring-inset ring-red-500 bg-red-500/10 focus:ring-red-500"
+            : "focus:ring-1 focus:ring-blue-500/40 focus:bg-slate-800/80"
+            }`}
+          {...minMaxProps}
         />
+        <FieldError message={error} />
       </div>
     );
   }
@@ -229,13 +279,16 @@ const EditableCell = ({ getValue, row, column, table }: any) => {
         id={`cell-${identifier}-${column.id}`}
         ref={inputRef}
         value={value}
+        disabled={isReadOnly}
         onChange={(e) => {
-          setValue(e.target.value);
+          if (isReadOnly) return;
+          const raw = e.target.value;
+          setValue(raw);
           if (error) table.options.meta?.clearFieldError?.(identifier, column.id);
         }}
         onBlur={onBlur}
         onKeyDown={handleKeyDown}
-        className={`w-full h-8 px-2 bg-slate-800/60 dark:bg-slate-800/40 border border-white/10 rounded-lg outline-none text-sm text-slate-100 placeholder:text-slate-500 transition-colors duration-100 ${error
+        className={`w-full h-8 px-2 bg-slate-800/60 dark:bg-slate-800/40 border border-white/10 rounded-lg outline-none text-sm text-slate-100 placeholder:text-slate-500 transition-colors duration-100 disabled:opacity-50 disabled:cursor-not-allowed ${error
           ? "ring-1 ring-inset ring-red-500 bg-red-500/10 focus:ring-red-500"
           : "focus:ring-1 focus:ring-blue-500/40 focus:bg-slate-800/80"
           }`}
@@ -257,22 +310,28 @@ const WeightCell = ({ getValue, row, column, table }: any) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const identifier: string = row.original.tempId || row.original.id;
-  // Read errors from ref for zero-lag rendering (ref never triggers re-render)
   const error: string | undefined = table.options.meta?.errorsRef?.current?.[identifier]?.[column.id];
+  const activeRegister = table.options.meta?.activeRegister;
+  const isReadOnly = activeRegister?.status === "Locked" || activeRegister?.status === "Archived";
 
+  const parentNum = String(getValue() ?? "");
+  const parentUnit = row.original.weightUnit || "gm";
   useEffect(() => {
-    setNum(String(getValue() ?? ""));
-    setUnit(row.original.weightUnit || "gm");
-  }, [row.original.tempId, row.original.id, getValue(), row.original.weightUnit]);
+    setNum(parentNum);
+    setUnit(parentUnit);
+  }, [parentNum, parentUnit]);
 
   const onBlur = () => {
+    if (isReadOnly) return;
     const val = parseFloat(num) || 0;
     table.options.meta?.updateData(identifier, "weightValue", val);
     table.options.meta?.updateData(identifier, "weightUnit", unit);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) =>
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (isReadOnly) return;
     table.options.meta?.handleCellKeyDown(e, identifier, column.id, inputRef.current);
+  };
 
   return (
     <div className="h-10 w-full flex items-center px-1 gap-1 relative overflow-hidden">
@@ -280,27 +339,32 @@ const WeightCell = ({ getValue, row, column, table }: any) => {
         id={`cell-${identifier}-${column.id}`}
         ref={inputRef}
         value={num}
+        disabled={isReadOnly}
         onChange={(e) => {
-          setNum(e.target.value);
+          if (isReadOnly) return;
+          const raw = e.target.value;
+          setNum(raw);
           if (error) table.options.meta?.clearFieldError?.(identifier, column.id);
         }}
         onBlur={onBlur}
         onKeyDown={handleKeyDown}
         placeholder="0.00"
-        className={`w-full h-8 px-2 bg-slate-800/60 dark:bg-slate-800/40 border border-white/10 rounded-lg outline-none text-right text-sm text-slate-100 placeholder:text-slate-500 transition-colors duration-100 ${error
+        className={`w-full h-8 px-2 bg-slate-800/60 dark:bg-slate-800/40 border border-white/10 rounded-lg outline-none text-right text-sm text-slate-100 placeholder:text-slate-500 transition-colors duration-100 disabled:opacity-50 disabled:cursor-not-allowed ${error
           ? "ring-1 ring-inset ring-red-500 bg-red-500/10 focus:ring-red-500"
           : "focus:ring-1 focus:ring-blue-500/40 focus:bg-slate-800/80"
           }`}
       />
       <Select
+        disabled={isReadOnly}
         value={unit}
         onValueChange={(v) => {
+          if (isReadOnly) return;
           const u = v || "kg";
           setUnit(u);
           table.options.meta?.updateData(identifier, "weightUnit", u);
         }}
       >
-        <SelectTrigger className="w-[48px] h-8 px-1 bg-slate-800/60 dark:bg-slate-800/40 border border-white/10 rounded-md appearance-none text-xs text-slate-400 hover:bg-slate-800/80 focus:ring-1 focus:ring-blue-500/40 focus:bg-slate-800/80 focus-visible:ring-offset-0 text-center">
+        <SelectTrigger className="w-[48px] h-8 px-1 bg-slate-800/60 dark:bg-slate-800/40 border border-white/10 rounded-md appearance-none text-xs text-slate-400 hover:bg-slate-800/80 focus:ring-1 focus:ring-blue-500/40 focus:bg-slate-800/80 focus-visible:ring-offset-0 text-center disabled:opacity-50 disabled:cursor-not-allowed">
           <SelectValue />
         </SelectTrigger>
         <SelectContent className="rounded-lg shadow-lg">
@@ -322,41 +386,21 @@ export const columns: ColumnDef<CourierEntry>[] = [
     header: "Sr.No",
     size: 45,
     cell: ({ row, table }) => {
-      // 1. Get all currently visible rows and identify this row's position
-      const visibleRows = table.getSortedRowModel().flatRows;
-      const rowIndex = visibleRows.findIndex((r) => r.id === row.id);
-
-      // 2. Retrieve pagination and offset data gracefully passed from DataTable
       const meta = table.options.meta as any;
-      const pageIndex = meta?.pageIndex ?? 0;
-      const pageSize = meta?.pageSize ?? (visibleRows.length > 0 ? visibleRows.length : 50);
+      const isDesc = table.getState().sorting.some((s) => s.desc);
 
-      // Obtain static Count from backend and offset it by any local (optimistic/deleted) modifiers
-      const staticTotalCount = meta?.totalCount ?? 0;
+      const pageIndex = meta?.pageIndex ?? 0;
+      const pageSize = meta?.pageSize ?? 50;
+      const staticTotalCount = meta?.totalCount ?? table.getRowModel().rows.length;
       const localRowOffset = meta?.localRowOffset ?? 0;
       const trueTotalCount = staticTotalCount + localRowOffset;
 
-      // 3. Calculate exactly what the Serial Number should be
-      const isDesc = table.getState().sorting.some((s) => s.desc);
-      let displayNo = 0;
-
-      if (isDesc) {
-        // Since we explicitly expanded trueTotalCount using localRowOffset, newly added
-        // rows mathematically sit proportionally "above" the backend's max value 
-        // without disturbing the absolute index mapping of the previous rows below.
-        const globalOrdinalIndex = (pageIndex * pageSize) + rowIndex;
-        displayNo = trueTotalCount - globalOrdinalIndex;
-      } else {
-        const globalOrdinalIndex = (pageIndex * pageSize) + rowIndex;
-        displayNo = globalOrdinalIndex + 1;
-      }
-
-      // Safeguard against NaN/negative
-      const finalDisplay = !isNaN(displayNo) && displayNo > 0 ? displayNo : "-";
+      const globalOrdinalIndex = pageIndex * pageSize + row.index;
+      const displayNo = isDesc ? trueTotalCount - globalOrdinalIndex : globalOrdinalIndex + 1;
 
       return (
         <div className="h-10 w-full flex items-center px-1 text-sm text-slate-300 truncate overflow-hidden whitespace-nowrap">
-          {finalDisplay}
+          {displayNo}
         </div>
       );
     },
@@ -490,27 +534,32 @@ export const columns: ColumnDef<CourierEntry>[] = [
       const isNew = !!entry.isNew;
       const isEdited = !!entry.isEdited;
       const hasErrors = Object.keys(table.options.meta?.errorsRef?.current?.[identifier] || {}).length > 0;
+      const activeRegister = table.options.meta?.activeRegister;
+      const isReadOnly = activeRegister?.status === "Locked" || activeRegister?.status === "Archived";
 
       if (isNew || isEdited) {
         return (
           <div className="flex w-full h-10 items-center justify-center gap-[6px] px-1 overflow-hidden" style={{ minWidth: '110px', maxWidth: '130px' }}>
-            {/* 🗑 DELETE BUTTON */}
             <Button
               variant="ghost"
               size="icon"
-              onClick={() => table.options.meta?.deleteRow(entry.id, identifier)}
-              className="h-8 w-[40px] rounded-lg text-xs px-2 text-red-500 hover:bg-red-500/10 flex items-center justify-center transition-transform hover:scale-[1.02] active:scale-[0.98] shrink-0"
+              disabled={isReadOnly}
+              onClick={() => {
+                if (isReadOnly) return;
+                table.options.meta?.deleteRow(entry.id, identifier);
+              }}
+              className="h-8 w-[40px] rounded-lg text-xs px-2 text-red-500 hover:bg-red-500/10 flex items-center justify-center transition-transform hover:scale-[1.02] active:scale-[0.98] shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Trash2 className="h-4 w-4" />
             </Button>
 
-            {/* 💾 SAVE BUTTON */}
             <Button
               id={`save-btn-${identifier}`}
               size="icon"
-              disabled={hasErrors}
+              disabled={hasErrors || isReadOnly}
               title={isNew ? "Save" : "Update"}
               onClick={async () => {
+                if (isReadOnly) return;
                 if (isNew) {
                   const res = await table.options.meta?.saveNewRow(identifier, true);
                   if (res?.success && res.nextTempId) {
@@ -522,7 +571,7 @@ export const columns: ColumnDef<CourierEntry>[] = [
                   table.options.meta?.saveEditedRow(identifier);
                 }
               }}
-              className={`h-8 w-[40px] rounded-lg text-xs flex items-center justify-center transition-transform hover:scale-[1.02] active:scale-[0.98] shrink-0 ${hasErrors
+              className={`h-8 w-[40px] rounded-lg text-xs flex items-center justify-center transition-transform hover:scale-[1.02] active:scale-[0.98] shrink-0 ${hasErrors || isReadOnly
                 ? "bg-transparent text-slate-500 cursor-not-allowed"
                 : "bg-blue-600 hover:bg-blue-700 text-white"
                 }`}
@@ -538,8 +587,12 @@ export const columns: ColumnDef<CourierEntry>[] = [
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => table.options.meta?.deleteRow(entry.id, identifier)}
-            className="h-8 w-full rounded-lg text-xs px-2 text-red-500 hover:bg-red-500/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all hover:scale-[1.02] active:scale-[0.98]"
+            disabled={isReadOnly}
+            onClick={() => {
+              if (isReadOnly) return;
+              table.options.meta?.deleteRow(entry.id, identifier);
+            }}
+            className="h-8 w-full rounded-lg text-xs px-2 text-red-500 hover:bg-red-500/10 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Trash2 className="h-4 w-4" />
           </Button>

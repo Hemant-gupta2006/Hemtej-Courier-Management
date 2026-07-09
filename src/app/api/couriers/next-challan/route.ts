@@ -6,7 +6,7 @@ import { checkRateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const session = await getServerSession(authOptions);
     if (!session || !session.user || !(session.user as any).id) {
@@ -18,13 +18,21 @@ export async function GET() {
       return NextResponse.json({ success: false, error: "Too Many Requests" }, { status: 429 });
     }
 
+    const { searchParams } = new URL(req.url);
+    const registerId = searchParams.get("registerId");
+
+    const whereClause: any = { userId };
+    if (registerId) {
+      whereClause.registerId = registerId;
+    }
+
     const lastEntry = await prisma.courierEntry.findFirst({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
+      where: whereClause,
+      orderBy: { challanNo: 'desc' },
       select: { challanNo: true }
     });
 
-    const nextChallanNo = lastEntry ? lastEntry.challanNo + 1 : 1001;
+    const nextChallanNo = lastEntry ? lastEntry.challanNo + 1 : 1;
 
     return NextResponse.json({ success: true, data: { nextChallanNo } });
   } catch (error) {
@@ -32,3 +40,4 @@ export async function GET() {
     return NextResponse.json({ success: false, error: "Internal server error" }, { status: 500 });
   }
 }
+

@@ -61,5 +61,41 @@ export const authOptions: NextAuthOptions = {
       return session;
     }
   },
+  events: {
+    async signIn({ user }) {
+      if (user) {
+        try {
+          const { recordActivity } = await import("@/lib/activityLog");
+          await recordActivity({
+            userId: user.id,
+            userName: user.name || user.email || "Staff",
+            role: (user as any).role || "Staff",
+            action: "LOGIN",
+            entity: "User",
+            entityId: user.id
+          });
+        } catch (e) {
+          console.error("Failed to log sign in event", e);
+        }
+      }
+    },
+    async signOut({ token }) {
+      if (token?.id) {
+        try {
+          const { recordActivity } = await import("@/lib/activityLog");
+          await recordActivity({
+            userId: String(token.id),
+            userName: String(token.name || token.email || "Staff"),
+            role: String(token.role || "Staff"),
+            action: "LOGOUT",
+            entity: "User",
+            entityId: String(token.id)
+          });
+        } catch (e) {
+          console.error("Failed to log sign out event", e);
+        }
+      }
+    }
+  },
   secret: process.env.NEXTAUTH_SECRET || "fallback_secret_for_local_dev",
 };

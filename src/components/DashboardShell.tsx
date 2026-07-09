@@ -1,27 +1,51 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { Navbar } from "@/components/Navbar";
 import { motion, AnimatePresence } from "framer-motion";
+import { usePathname, useSearchParams } from "next/navigation";
 
-export function DashboardShell({ children }: { children: React.ReactNode }) {
-  // 🔥 Start CLOSED on mobile
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+function MainContent({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const registerId = searchParams.get("registerId");
+  const isRegisterView = pathname === "/dashboard/entries" && registerId;
 
   return (
-    <div className="flex h-screen w-full relative z-10 p-1 md:p-2 gap-2 md:gap-4 overflow-hidden">
+    <div
+      className={`flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-800 ${
+        isRegisterView ? "px-2 py-1.5 sm:px-3 sm:py-1.5" : "px-3 py-3 sm:px-4 sm:py-4"
+      }`}
+    >
+      {children}
+    </div>
+  );
+}
+
+export function DashboardShell({ children }: { children: React.ReactNode }) {
+  // Start OPEN by default on desktop, closed on mobile
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 768) {
+      setIsSidebarOpen(false);
+    }
+  }, []);
+
+  return (
+    <div className="flex h-screen w-full relative z-10 overflow-hidden bg-slate-50 dark:bg-[#0a0f1c]">
 
       {/* ✅ DESKTOP SIDEBAR */}
       <AnimatePresence initial={false}>
         {isSidebarOpen && (
           <motion.div
             key="sidebar"
-            initial={{ width: 0, opacity: 0, marginRight: -16 }}
-            animate={{ width: 280, opacity: 1, marginRight: 0 }}
-            exit={{ width: 0, opacity: 0, marginRight: -16 }}
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 280, opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
             transition={{ duration: 0.3 }}
-            className="hidden md:flex md:flex-col h-full rounded-[24px] overflow-hidden backdrop-blur-3xl bg-white/60 dark:bg-[#111827]/70 border border-white/40 dark:border-white/10 shadow-lg shrink-0"
+            className="hidden md:flex md:flex-col h-full border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0f172a] shrink-0 overflow-hidden"
           >
             <Sidebar />
           </motion.div>
@@ -56,7 +80,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       <motion.main
         layout
         transition={{ duration: 0.3 }}
-        className="flex-1 flex flex-col h-full rounded-[24px] overflow-hidden backdrop-blur-3xl bg-white/40 dark:bg-[#111827]/40 border border-white/40 dark:border-white/10 shadow-lg relative min-w-0"
+        className="flex-1 flex flex-col h-full bg-slate-50 dark:bg-[#0a0f1c] relative min-w-0 overflow-x-hidden"
       >
         <div className="flex-shrink-0">
           <Navbar
@@ -65,11 +89,15 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
           />
         </div>
 
-        <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-800">
-          {children}
-        </div>
+        <Suspense fallback={
+          <div className="flex-1 overflow-y-auto overflow-x-hidden px-2 py-1.5 sm:px-3 sm:py-1.5">
+            {children}
+          </div>
+        }>
+          <MainContent>{children}</MainContent>
+        </Suspense>
       </motion.main>
 
     </div>
   );
-}
+}

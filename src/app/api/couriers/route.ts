@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { recordActivity } from "@/lib/activityLog";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { checkRateLimit } from "@/lib/rate-limit";
@@ -24,6 +25,7 @@ export async function GET(req: Request) {
     const startDateParam = searchParams.get("startDate");
     const endDateParam = searchParams.get("endDate");
     const statusParam = searchParams.get("status");
+    const registerIdParam = searchParams.get("registerId");
 
     // Determine pagination parameters
     const take = limitParam ? parseInt(limitParam, 10) : undefined;
@@ -36,6 +38,10 @@ export async function GET(req: Request) {
 
     // Build unique where clause
     const where: any = { userId };
+
+    if (registerIdParam) {
+      where.registerId = registerIdParam;
+    }
 
     if (startDateParam && endDateParam) {
       where.date = {
@@ -143,6 +149,57 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: "Missing required fields" }, { status: 400 });
     }
 
+    // Resolve or create register if not provided, or validate the provided register
+    let finalRegisterId = body.registerId;
+    const monthNames = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
+    ];
+
+    if (!finalRegisterId) {
+      const entryMonth = date.getMonth() + 1;
+      const entryYear = date.getFullYear();
+      let register = await prisma.courierRegister.findFirst({
+        where: { userId, month: entryMonth, year: entryYear }
+      });
+      if (!register) {
+        const name = `${monthNames[entryMonth - 1]} ${entryYear}`;
+        register = await prisma.courierRegister.create({
+          data: {
+            userId,
+            month: entryMonth,
+            year: entryYear,
+            name,
+            status: "Active"
+          }
+        });
+      }
+      finalRegisterId = register.id;
+    } else {
+      const register = await prisma.courierRegister.findUnique({
+        where: { id: finalRegisterId }
+      });
+      if (!register) {
+        return NextResponse.json({ success: false, error: "Register not found" }, { status: 404 });
+      }
+      if (register.userId !== userId) {
+        return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
+      }
+      if (register.status === "Locked" || register.status === "Archived") {
+        return NextResponse.json({ success: false, error: `This register is ${register.status.toLowerCase()} and cannot be modified.` }, { status: 400 });
+      }
+
+      // Date validation
+      const entryMonth = date.getMonth() + 1;
+      const entryYear = date.getFullYear();
+      if (entryMonth !== register.month || entryYear !== register.year) {
+        return NextResponse.json({
+          success: false,
+          error: `Entry date must match the register's month and year (${monthNames[register.month - 1]} ${register.year}).`
+        }, { status: 400 });
+      }
+    }
+
     const MAX_RETRIES = 5;
     let attempts = 0;
     let courier;
@@ -182,6 +239,7 @@ export async function POST(req: Request) {
               amount,
               status,
               mode,
+              registerId: finalRegisterId
             }
           });
         });
@@ -199,6 +257,22 @@ export async function POST(req: Request) {
         throw error;
       }
     }
+
+    if (!courier) {
+      return NextResponse.json({ success: false, error: "Failed to create courier entry" }, { status: 500 });
+    }
+
+    const sessionUser = session.user as any;
+    await recordActivity({
+      userId: sessionUser.id,
+      userName: sessionUser.name || sessionUser.email || "Staff",
+      role: sessionUser.role || "Staff",
+      action: "COURIER_CREATE",
+      entity: "CourierEntry",
+      entityId: courier.id,
+      newValue: JSON.stringify(courier),
+      req
+    });
 
     return NextResponse.json({ success: true, data: courier });
   } catch (error: any) {

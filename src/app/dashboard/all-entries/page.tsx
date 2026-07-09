@@ -139,46 +139,42 @@ export default function AllEntriesPage() {
         </div>
       ) : (
         <>
-          <div className="flex-1 overflow-hidden mt-0">
-            <div className="h-full overflow-auto will-change-transform">
-              <div className="w-full overflow-x-auto pb-0">
-                <DataTable
-                  columns={columns}
-                  data={memoData}
-                  totalCount={totalCount}
-                  pageIndex={page - 1}
-                  pageSize={limit}
-                  mode="all"
-                  searchValue={searchValue}
-                  onSearchChange={setSearchValue}
-                  startDate={startDate}
-                  onStartDateChange={setStartDate}
-                  endDate={endDate}
-                  onEndDateChange={setEndDate}
-                  statusFilter={statusFilter}
-                  onStatusFilterChange={setStatusFilter}
-                  onApplyFilters={handleApplyFilters}
-                  onApplyStatusFilter={handleApplyStatusFilter}
-                  appliedFilters={appliedFilters}
-                  onClearDate={handleClearDate}
-                  onClearStatus={handleClearStatus}
-                  onClearAll={handleClearAll}
-                  onExportExcel={() => {
-                    const params = new URLSearchParams();
-                    if (appliedFilters.search) params.append("search", appliedFilters.search);
-                    if (appliedFilters.startDate) params.append("startDate", appliedFilters.startDate);
-                    if (appliedFilters.endDate) params.append("endDate", appliedFilters.endDate);
-                    if (appliedFilters.status && appliedFilters.status !== "all") params.append("status", appliedFilters.status);
-                    const a = document.createElement("a");
-                    a.href = `/api/couriers/export?${params.toString()}`;
-                    a.download = "Couriers_Filtered_Export.xlsx";
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                  }}
-                />
-              </div>
-            </div>
+          <div className="flex-1 flex flex-col min-h-0 mt-0">
+            <DataTable
+              columns={columns}
+              data={memoData}
+              totalCount={totalCount}
+              pageIndex={page - 1}
+              pageSize={limit}
+              mode="all"
+              searchValue={searchValue}
+              onSearchChange={setSearchValue}
+              startDate={startDate}
+              onStartDateChange={setStartDate}
+              endDate={endDate}
+              onEndDateChange={setEndDate}
+              statusFilter={statusFilter}
+              onStatusFilterChange={setStatusFilter}
+              onApplyFilters={handleApplyFilters}
+              onApplyStatusFilter={handleApplyStatusFilter}
+              appliedFilters={appliedFilters}
+              onClearDate={handleClearDate}
+              onClearStatus={handleClearStatus}
+              onClearAll={handleClearAll}
+              onExportExcel={() => {
+                const params = new URLSearchParams();
+                if (appliedFilters.search) params.append("search", appliedFilters.search);
+                if (appliedFilters.startDate) params.append("startDate", appliedFilters.startDate);
+                if (appliedFilters.endDate) params.append("endDate", appliedFilters.endDate);
+                if (appliedFilters.status && appliedFilters.status !== "all") params.append("status", appliedFilters.status);
+                const a = document.createElement("a");
+                a.href = `/api/couriers/export?${params.toString()}`;
+                a.download = "Couriers_Filtered_Export.xlsx";
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+              }}
+            />
           </div>
 
           <div className="flex-shrink-0 flex justify-between items-center py-1 px-1">

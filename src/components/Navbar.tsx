@@ -2,14 +2,15 @@
 
 import { UserButton } from "./UserButton";
 import { ThemeToggle } from "./ThemeToggle";
-import { Menu, PanelLeftClose, PanelLeftOpen, List, Trash2, AlertTriangle } from "lucide-react";
+import { Menu, PanelLeftClose, PanelLeftOpen, Trash2, AlertTriangle, ChevronLeft, ChevronRight, FolderClosed } from "lucide-react";
 import { Button } from "./ui/button";
-import { useState, useRef, useEffect } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useState, useRef, useEffect, Suspense } from "react";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Input } from "./ui/input";
+import { useRegisters } from "@/context/RegisterContext";
 
-// ── Inline lightweight modal ──────────────────────────────────────────────
+// ── Inline lightweight modal for Delete All ─────────────────────────────────
 function DeleteAllModal({
   open,
   onClose,
@@ -91,11 +92,26 @@ interface NavbarProps {
   isSidebarOpen?: boolean;
 }
 
-export const Navbar = ({ onToggleSidebar, isSidebarOpen }: NavbarProps) => {
+function NavbarInner({ onToggleSidebar, isSidebarOpen }: NavbarProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const registerId = searchParams.get("registerId");
+
+  const { activeRegister, updateRegisterStatus, deleteRegister } = useRegisters();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+
+  const pageParam = searchParams.get("page");
+  const currentPage = pageParam ? parseInt(pageParam, 10) : 1;
+  const entryCount = activeRegister?.entryCount ?? 0;
+  const totalPages = Math.max(1, Math.ceil(entryCount / 50));
+
+  const handlePageChange = (newPage: number) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("page", newPage.toString());
+    router.push(`${pathname}?${params.toString()}`);
+  };
 
   const handleDeleteAll = async () => {
     setDeleteLoading(true);
@@ -104,7 +120,7 @@ export const Navbar = ({ onToggleSidebar, isSidebarOpen }: NavbarProps) => {
       if (res.ok) {
         setDeleteOpen(false);
         toast.success("All entries deleted successfully.");
-        window.location.reload(); // Refresh the page to clear the table
+        window.location.reload();
       } else {
         toast.error("Failed to delete entries.");
       }
@@ -115,7 +131,17 @@ export const Navbar = ({ onToggleSidebar, isSidebarOpen }: NavbarProps) => {
     }
   };
 
-  const showTableActions = pathname === "/dashboard/entries";
+  const handleDeleteRegister = async () => {
+    if (!activeRegister) return;
+    if (confirm(`Are you sure you want to delete register "${activeRegister.name}" and all its entries? This action cannot be undone.`)) {
+      const ok = await deleteRegister(activeRegister.id);
+      if (ok) {
+        router.push("/dashboard/entries");
+      }
+    }
+  };
+
+  const isRegisterView = pathname === "/dashboard/entries" && registerId && activeRegister;
 
   return (
     <>
@@ -125,61 +151,146 @@ export const Navbar = ({ onToggleSidebar, isSidebarOpen }: NavbarProps) => {
         onConfirm={handleDeleteAll}
         loading={deleteLoading}
       />
-      <div className="flex items-center py-2 px-3 md:p-4 md:px-6 border-b border-white/40 dark:border-white/5 bg-white/20 dark:bg-slate-900/20 backdrop-blur-md gap-2">
-      {/* Sidebar toggle — visible on desktop */}
-      {onToggleSidebar && (
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onToggleSidebar}
-          className="hidden md:flex text-slate-600 dark:text-slate-300 hover:bg-white/50 dark:hover:bg-slate-800/50 transition-colors shrink-0"
-          title={isSidebarOpen ? "Hide sidebar" : "Show sidebar"}
-        >
-          {isSidebarOpen ? (
-            <PanelLeftClose className="h-5 w-5" />
-          ) : (
-            <PanelLeftOpen className="h-5 w-5" />
-          )}
-        </Button>
-      )}
-
-      {/* Mobile-only hamburger (original) */}
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={onToggleSidebar}
-        className="md:hidden text-slate-700 dark:text-slate-300"
-      >
-        <Menu className="h-5 w-5" />
-      </Button>
-
-      <div className="flex w-full justify-end items-center gap-3">
-        {showTableActions && (
-          <div className="hidden md:flex items-center gap-2 mr-2">
+      <div className="flex items-center justify-between py-2 px-3 md:px-6 border-b border-slate-200 dark:border-slate-800/80 bg-white dark:bg-[#0f172a] h-14 w-full gap-4">
+        <div className="flex items-center gap-2 min-w-0">
+          {/* Sidebar toggle — visible on desktop */}
+          {onToggleSidebar && (
             <Button
-              variant="outline"
-              size="sm"
-              onClick={() => router.push("/dashboard/all-entries")}
-              className="rounded-xl border-teal-300 dark:border-teal-700 text-teal-700 dark:text-teal-300 hover:bg-teal-50 dark:hover:bg-teal-900/20 gap-2 h-9"
+              variant="ghost"
+              size="icon"
+              onClick={onToggleSidebar}
+              className="hidden md:flex text-slate-600 dark:text-slate-350 hover:bg-slate-100 dark:hover:bg-slate-800/60 transition-colors shrink-0 h-9 w-9"
+              title={isSidebarOpen ? "Hide sidebar" : "Show sidebar"}
             >
-              <List className="h-4 w-4" />
-              Show All Entries
+              {isSidebarOpen ? (
+                <PanelLeftClose className="h-4 w-4" />
+              ) : (
+                <PanelLeftOpen className="h-4 w-4" />
+              )}
             </Button>
+          )}
+
+          {/* Mobile-only hamburger */}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onToggleSidebar}
+            className="md:hidden text-slate-700 dark:text-slate-300 h-9 w-9 shrink-0"
+          >
+            <Menu className="h-4 w-4" />
+          </Button>
+
+          {/* Breadcrumbs for Active Register */}
+          {isRegisterView ? (
+            <div className="flex items-center gap-1.5 text-xs md:text-sm font-semibold text-slate-500 dark:text-slate-400 min-w-0">
+              <button
+                onClick={() => router.push("/dashboard/entries")}
+                className="hover:text-purple-600 dark:hover:text-purple-400 transition-colors shrink-0"
+              >
+                Registers
+              </button>
+              <ChevronRight className="h-3.5 w-3.5 text-slate-400 dark:text-slate-600 shrink-0" />
+              <div className="flex items-center gap-1.5 text-slate-900 dark:text-slate-100 font-bold min-w-0">
+                <FolderClosed className="h-4 w-4 text-purple-650 dark:text-purple-400 shrink-0" />
+                <span className="truncate">{activeRegister.name}</span>
+              </div>
+              <select
+                value={activeRegister.status}
+                onChange={(e) => updateRegisterStatus(activeRegister.id, e.target.value as any)}
+                className={`text-[10px] font-bold px-2 py-0.5 ml-1.5 rounded-full outline-none border cursor-pointer appearance-none transition-colors ${
+                  activeRegister.status === "Active"
+                    ? "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20"
+                    : activeRegister.status === "Locked"
+                    ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+                    : "bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20"
+                }`}
+              >
+                <option value="Active" className="bg-white dark:bg-slate-950 text-slate-900 dark:text-white">Active</option>
+                <option value="Locked" className="bg-white dark:bg-slate-950 text-slate-900 dark:text-white">Locked</option>
+                <option value="Archived" className="bg-white dark:bg-slate-950 text-slate-900 dark:text-white">Archived</option>
+              </select>
+            </div>
+          ) : (
+            <span className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+              {pathname === "/dashboard"
+                ? "Dashboard"
+                : pathname === "/dashboard/entries"
+                ? "Courier Registers"
+                : pathname === "/dashboard/reports"
+                ? "Reports"
+                : pathname === "/dashboard/all-entries"
+                ? "All Entries"
+                : "Courier Management"}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3 shrink-0 ml-auto">
+          {/* Stats & Pagination in Navbar */}
+          {isRegisterView && (
+            <div className="flex items-center gap-2">
+              <div className="hidden sm:flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 px-3 py-1 rounded-full">
+                <span>Entries <strong className="text-slate-800 dark:text-slate-200">{activeRegister.entryCount ?? 0}</strong></span>
+                <span className="text-slate-300 dark:text-slate-700">|</span>
+                <span>Pending <strong className="text-slate-800 dark:text-slate-200">{activeRegister.pendingCount ?? 0}</strong></span>
+                <span className="text-slate-300 dark:text-slate-700">|</span>
+                <span>Amount <strong className="text-slate-800 dark:text-slate-200">₹{(activeRegister.totalAmount ?? 0).toLocaleString("en-IN")}</strong></span>
+              </div>
+
+              {/* Pagination Controls */}
+              <div className="flex items-center gap-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 px-1.5 py-0.5 rounded-full">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  disabled={currentPage <= 1}
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  className="h-5 w-5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-650 dark:text-slate-350 disabled:opacity-30 disabled:hover:bg-transparent"
+                >
+                  <ChevronLeft className="h-3 w-3" />
+                </Button>
+                <span className="px-1 select-none">
+                  Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong>
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  className="h-5 w-5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-650 dark:text-slate-350 disabled:opacity-30 disabled:hover:bg-transparent"
+                >
+                  <ChevronRight className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Delete Register trigger */}
+          {isRegisterView && (
             <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setDeleteOpen(true)}
-              className="rounded-xl border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 gap-2 h-9"
+              variant="ghost"
+              size="icon"
+              onClick={handleDeleteRegister}
+              className="h-8 w-8 text-slate-400 hover:text-red-500 hover:bg-red-500/10 shrink-0"
+              title="Delete Register"
             >
               <Trash2 className="h-4 w-4" />
-              Delete All
             </Button>
-          </div>
-        )}
-        <ThemeToggle />
-        <UserButton />
+          )}
+
+          <ThemeToggle />
+          <UserButton />
+        </div>
       </div>
-    </div>
     </>
+  );
+}
+
+export const Navbar = (props: NavbarProps) => {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-between py-2 px-3 md:px-6 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0f172a] h-14 w-full" />
+    }>
+      <NavbarInner {...props} />
+    </Suspense>
   );
 };

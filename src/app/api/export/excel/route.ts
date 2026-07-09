@@ -4,20 +4,29 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import * as XLSX from "xlsx";
 import { formatWeight } from "@/lib/utils";
+import { recordActivity } from "@/lib/activityLog";
 
 export async function GET(req: Request) {
   try {
     const session = await getServerSession(authOptions);
     if (!session) return new NextResponse("Unauthorized", { status: 401 });
 
+    const { searchParams } = new URL(req.url);
+    const registerIdParam = searchParams.get("registerId");
+
+    const where: any = { userId: (session.user as any).id };
+    if (registerIdParam) {
+      where.registerId = registerIdParam;
+    }
+
     // Fetch all entries securely for the logged-in user, sorted by creation date
     const couriers = await prisma.courierEntry.findMany({
-      where: { userId: (session.user as any).id },
+      where,
       orderBy: { srNo: 'asc' },
     });
 
-    const tableData = couriers.map(row => ({
-      "Sr.No": Number(row.srNo) || 0,
+    const tableData = couriers.map((row, index) => ({
+      "Sr.No": index + 1,
       "Date": new Date(row.date),
       "Challan No": row.challanNo,
       "From Party": row.fromParty,
@@ -53,6 +62,18 @@ export async function GET(req: Request) {
     const excelBuffer = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
 
     // Return as downloadable file
+    const sessionUser = session.user as any;
+    await recordActivity({
+      userId: sessionUser.id,
+      userName: sessionUser.name || sessionUser.email || "Staff",
+      role: sessionUser.role || "Staff",
+      action: "REPORT_EXPORT",
+      entity: "Report",
+      entityId: registerIdParam || "All",
+      newValue: JSON.stringify({ registerId: registerIdParam, entriesCount: couriers.length }),
+      req
+    });
+
     return new NextResponse(excelBuffer, {
       headers: {
         "Content-Disposition": `attachment; filename="Couriers_Export_${new Date().toISOString().split('T')[0]}.xlsx"`,

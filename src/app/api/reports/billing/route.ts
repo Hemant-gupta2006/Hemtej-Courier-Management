@@ -4,6 +4,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import ExcelJS from "exceljs";
 import { formatWeight } from "@/lib/utils";
+import { recordActivity } from "@/lib/activityLog";
 
 export async function GET(req: Request) {
   try {
@@ -36,10 +37,16 @@ export async function GET(req: Request) {
     const line2 = businessAddressLines.slice(2, 5).join(', ');
     const line3 = businessAddressLines.slice(5).join(', ');
 
+    const registerIdParam = searchParams.get("registerId");
+
     const where: any = {
       userId: (session.user as any).id,
       status: "Account",
     };
+
+    if (registerIdParam) {
+      where.registerId = registerIdParam;
+    }
 
     if (fromParty) {
       where.fromParty = { contains: fromParty, mode: "insensitive" };
@@ -352,6 +359,18 @@ export async function GET(req: Request) {
     const filename = fromParty
       ? `Invoice_${fromParty.replace(/\s+/g, '_')}.xlsx`
       : `Tax_Invoice_${new Date().toISOString().split('T')[0]}.xlsx`;
+
+    const sessionUser = session.user as any;
+    await recordActivity({
+      userId: sessionUser.id,
+      userName: sessionUser.name || sessionUser.email || "Staff",
+      role: sessionUser.role || "Staff",
+      action: "INVOICE_DOWNLOAD",
+      entity: "Invoice",
+      entityId: fromParty || "All",
+      newValue: JSON.stringify({ billNo, fromParty, entriesCount: entries.length }),
+      req
+    });
 
     return new NextResponse(buffer as any, {
       headers: {

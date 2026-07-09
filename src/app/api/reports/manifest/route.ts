@@ -4,6 +4,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import * as XLSX from "xlsx";
 import { formatWeight } from "@/lib/utils";
+import { recordActivity } from "@/lib/activityLog";
 
 export async function GET(req: Request) {
   try {
@@ -13,19 +14,27 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const dateStr = searchParams.get("date") || new Date().toISOString().split('T')[0];
 
+    const registerIdParam = searchParams.get("registerId");
+
     const targetDate = new Date(dateStr);
     const nextDate = new Date(targetDate);
     nextDate.setDate(targetDate.getDate() + 1);
 
     // Fetch entries for the specific day
-    const entries = await prisma.courierEntry.findMany({
-      where: {
-        userId: (session.user as any).id,
-        date: {
-          gte: targetDate,
-          lt: nextDate,
-        },
+    const where: any = {
+      userId: (session.user as any).id,
+      date: {
+        gte: targetDate,
+        lt: nextDate,
       },
+    };
+
+    if (registerIdParam) {
+      where.registerId = registerIdParam;
+    }
+
+    const entries = await prisma.courierEntry.findMany({
+      where,
       orderBy: [
         { destination: "asc" },
         { srNo: "asc" },
@@ -68,6 +77,18 @@ export async function GET(req: Request) {
     XLSX.utils.book_append_sheet(workbook, worksheet, "Daily Manifest");
 
     const buffer = XLSX.write(workbook, { bookType: "xlsx", type: "buffer" });
+
+    const sessionUser = session.user as any;
+    await recordActivity({
+      userId: sessionUser.id,
+      userName: sessionUser.name || sessionUser.email || "Staff",
+      role: sessionUser.role || "Staff",
+      action: "MANIFEST_DOWNLOAD",
+      entity: "Manifest",
+      entityId: dateStr,
+      newValue: JSON.stringify({ dateStr, entriesCount: entries.length }),
+      req
+    });
 
     return new NextResponse(buffer, {
       headers: {

@@ -138,8 +138,8 @@ function MobileAutoInput({
           onKeyDown={handleKeyDown}
           onBlur={handleBlur}
           className={`h-12 text-base rounded-xl bg-slate-50/50 dark:bg-slate-900/50 focus-visible:ring-2 focus-visible:ring-blue-500/40 transition-all relative z-10 bg-transparent ${error
-              ? "border-red-500 ring-1 ring-red-500 focus-visible:ring-red-500"
-              : "border-slate-200 dark:border-slate-700 focus-visible:ring-blue-500"
+            ? "border-red-500 ring-1 ring-red-500 focus-visible:ring-red-500"
+            : "border-slate-200 dark:border-slate-700 focus-visible:ring-blue-500"
             }`}
           style={{ backgroundColor: "transparent" }}
         />
@@ -171,8 +171,8 @@ function SegmentedSelect({
             type="button"
             onClick={() => onChange(opt)}
             className={`px-4 py-2.5 rounded-xl text-sm font-medium border transition-all ${value === opt
-                ? "bg-blue-600 border-blue-600 text-white shadow-sm"
-                : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-blue-400"
+              ? "bg-blue-600 border-blue-600 text-white shadow-sm"
+              : "bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:border-blue-400"
               }`}
           >
             {opt}
@@ -189,11 +189,15 @@ export function MobileEntryForm({
   autocompleteData,
   onSaved,
   mobileDefaultDate,
+  activeRegisterId,
+  isReadOnly = false,
 }: {
   existingChallans: string[];
   autocompleteData: { fromParties: string[]; toParties: string[]; destinations: string[] };
   onSaved: (newEntry: any) => void;
   mobileDefaultDate?: string | null;
+  activeRegisterId?: string;
+  isReadOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [loading, setSaving] = useState(false);
@@ -273,6 +277,11 @@ export function MobileEntryForm({
   };
 
   const handleSave = async () => {
+    if (isReadOnly) {
+      toast.error("Cannot modify entries in a locked or archived register.");
+      return;
+    }
+
     const errs = validate();
     if (Object.keys(errs).length > 0) {
       setErrors(errs);
@@ -308,6 +317,7 @@ export function MobileEntryForm({
           amount: parseFloat(cleaned.amount) || 0,
           status: cleaned.status,
           mode: cleaned.mode,
+          registerId: activeRegisterId,
         }),
       });
       if (res.ok) {
@@ -327,6 +337,8 @@ export function MobileEntryForm({
       setSaving(false);
     }
   };
+
+  if (isReadOnly) return null;
 
   return (
     <>
@@ -416,8 +428,8 @@ export function MobileEntryForm({
                     onKeyDown={(e) => handleKeyDown(e, "m-from")}
                     placeholder="e.g. 1042"
                     className={`h-12 text-base rounded-xl bg-slate-50/50 dark:bg-slate-900/50 focus-visible:ring-2 focus-visible:ring-blue-500/40 transition-all ${errors.challanNo
-                        ? "border-red-500 ring-1 ring-red-500"
-                        : "border-slate-200 dark:border-slate-700"
+                      ? "border-red-500 ring-1 ring-red-500"
+                      : "border-slate-200 dark:border-slate-700"
                       }`}
                   />
                   {errors.challanNo && (
@@ -464,8 +476,8 @@ export function MobileEntryForm({
                       onKeyDown={(e) => handleKeyDown(e, "m-dest")}
                       placeholder="100"
                       className={`h-12 text-base rounded-xl flex-1 bg-slate-50/50 dark:bg-slate-900/50 focus-visible:ring-2 focus-visible:ring-blue-500/40 transition-all ${errors.weight
-                          ? "border-red-500 ring-1 ring-red-500"
-                          : "border-slate-200 dark:border-slate-700"
+                        ? "border-red-500 ring-1 ring-red-500"
+                        : "border-slate-200 dark:border-slate-700"
                         }`}
                     />
                     <div className="flex rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden shrink-0">
@@ -475,8 +487,8 @@ export function MobileEntryForm({
                           type="button"
                           onClick={() => set("weightUnit", u)}
                           className={`px-5 h-12 text-sm font-semibold transition-colors ${form.weightUnit === u
-                              ? "bg-blue-600 text-white"
-                              : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300"
+                            ? "bg-blue-600 text-white"
+                            : "bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300"
                             }`}
                         >
                           {u}
@@ -522,8 +534,8 @@ export function MobileEntryForm({
                       onKeyDown={(e) => handleKeyDown(e, null)}
                       placeholder="0"
                       className={`h-12 text-base rounded-xl pl-8 bg-slate-50/50 dark:bg-slate-900/50 focus-visible:ring-2 focus-visible:ring-blue-500/40 transition-all ${errors.amount
-                          ? "border-red-500 ring-1 ring-red-500"
-                          : "border-slate-200 dark:border-slate-700"
+                        ? "border-red-500 ring-1 ring-red-500"
+                        : "border-slate-200 dark:border-slate-700"
                         }`}
                     />
                   </div>

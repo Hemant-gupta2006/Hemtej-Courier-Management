@@ -50,6 +50,7 @@ model User {
   accounts      Account[]
   sessions      Session[]
   courierEntries CourierEntry[]
+  courierRegisters CourierRegister[]
 }
 
 model VerificationToken {
@@ -77,6 +78,49 @@ model CourierEntry {
   mode        String?  @default("Surface") // Surface, Air, Cargo, V Fast
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+  registerId  String?
+  register    CourierRegister? @relation(fields: [registerId], references: [id], onDelete: Cascade)
 
   @@unique([challanNo, userId])
 }
+
+model CourierRegister {
+  id             String         @id @default(cuid())
+  userId         String
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  month          Int            // 1-12
+  year           Int
+  status         String         @default("Active") // "Active", "Locked", "Archived"
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  courierEntries CourierEntry[]
+
+  @@unique([userId, month, year])
+}
+
+model SystemSettings {
+  id             String   @id @default("global")
+  companyName    String   @default("HemTej Co")
+  companyLogo    String   @default("/icon.png")
+  companyAddress String   @default("")
+  companyPhone   String   @default("")
+  companyEmail   String   @default("")
+  companyGst     String   @default("")
+  defaultStatus  String   @default("Cash")
+  updatedAt      DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  adminId   String
+  adminName String
+  action    String
+  entity    String
+  entityId  String
+  oldValue  String?
+  newValue  String?
+  timestamp DateTime @default(now())
+}
+
+

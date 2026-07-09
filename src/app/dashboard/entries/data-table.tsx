@@ -1,17 +1,14 @@
 "use client";
 
-import * as React from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   ColumnDef,
   flexRender,
   getCoreRowModel,
-  useReactTable,
   getSortedRowModel,
   SortingState,
-  getFilteredRowModel,
+  useReactTable,
 } from "@tanstack/react-table";
-import { useVirtualizer } from "@tanstack/react-virtual";
-
 import {
   Table,
   TableBody,
@@ -20,14 +17,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { PlusCircle, Download, Settings2, RefreshCw, Save, X, Search, Filter, CalendarDays } from "lucide-react";
-import { toast } from "sonner";
-import { useRouter } from "next/navigation";
-import * as XLSX from "xlsx";
-import { saveAs } from "file-saver";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -35,9 +27,29 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
+import { CourierEntry } from "@prisma/client";
+import { PlusCircle, Download, Settings2, RefreshCw, Search, X, Calendar } from "lucide-react";
+import { toast } from "sonner";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import * as XLSX from "xlsx";
+import { useRegisters } from "@/context/RegisterContext";
 import { getAutocompleteData, clearAutocompleteCache } from "@/lib/autocomplete";
 
+interface BatchDefaults {
+  date: string;
+  fromParty: string;
+  destination: string;
+  weightNum: string;
+  weightUnit: string;
+  status: string;
+  mode: string;
+}
+
+interface AppliedFilters {
+  startDate?: string;
+  endDate?: string;
+  status?: string;
+}
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
@@ -45,15 +57,6 @@ interface DataTableProps<TData, TValue> {
   totalCount?: number;
   pageIndex?: number;
   pageSize?: number;
-  /** When true, only visible rows are rendered — essential for 100+ rows. */
-  virtualize?: boolean;
-  /** Height of the virtualised scroll container. Default: "560px" */
-  tableHeight?: string;
-  /**
-   * "entry" mode includes batch settings and add row UI.
-   * "all" mode is purely for viewing and editing existing rows.
-   * Default: "entry"
-   */
   mode?: "entry" | "all";
   searchValue?: string;
   onSearchChange?: (val: string) => void;
@@ -63,18 +66,37 @@ interface DataTableProps<TData, TValue> {
   onEndDateChange?: (val: string) => void;
   statusFilter?: string;
   onStatusFilterChange?: (val: string) => void;
+  appliedFilters?: AppliedFilters;
   onApplyFilters?: () => void;
   onApplyStatusFilter?: (status: string) => void;
-  appliedFilters?: { search: string; startDate: string; endDate: string; status: string };
   onClearDate?: () => void;
   onClearStatus?: () => void;
   onClearAll?: () => void;
   onExportExcel?: () => void;
+  activeRegister?: any;
+}
+
+interface LocalRow {
+  id: string;
+  tempId?: string;
+  srNo?: number;
+  date: string;
+  challanNo: number | string;
+  fromParty: string;
+  toParty: string;
+  weightValue: number;
+  weightUnit: string;
+  destination: string;
+  amount: number;
+  status: string;
+  mode: string;
+  isNew?: boolean;
+  isEdited?: boolean;
+  registerId?: string | null;
 }
 
 type ValidationErrors = Record<string, Record<string, string>>;
 
-// Auto-capitalize first letter of each word, lowercase the rest, trim spaces
 const capitalizeWords = (s: string) =>
   s
     .trim()
@@ -83,32 +105,21 @@ const capitalizeWords = (s: string) =>
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
     .join(" ");
 
-// ─────────────────────────────────────────────
-// MemoizedRow — skips re-render unless this row's data or error changes.
-// Defined at module level so it is never re-created on DataTable re-renders.
-// ─────────────────────────────────────────────
 interface MemoizedRowProps {
   row: any;
   rowErrorVersion: number;
   errorsRef: React.MutableRefObject<ValidationErrors>;
-  saveNewRow: (identifier: string, addNextRow: boolean) => Promise<{ success: boolean; nextTempId?: string }>;
+  saveNewRow: (identifier: string, addNextRow?: boolean) => Promise<{ success: boolean; nextTempId?: string }>;
   saveEditedRow: (identifier: string) => void;
 }
 
 const MemoizedRow = React.memo(
   function MemoRow({ row, rowErrorVersion, errorsRef, saveNewRow, saveEditedRow }: MemoizedRowProps) {
     const identifier: string = row.original.tempId || row.original.id;
-    const isNew: boolean = !!row.original.isNew;
-    const isEdited: boolean = !!row.original.isEdited;
-    // Read latest error state from ref — always fresh on each render
-    const hasErrors = Object.keys(errorsRef.current[identifier] || {}).length > 0;
 
     return (
-      <tr
-        className={`group border-b border-white/5 transition-all duration-150 ${isEdited && !isNew
-          ? "bg-amber-500/10 hover:bg-amber-500/20"
-          : "hover:bg-white/5"
-          }`}
+      <TableRow
+        className="group border-b border-white/5 transition-all duration-150 hover:bg-white/5"
       >
         {row.getVisibleCells().map((cell: any) => (
           <TableCell
@@ -119,21 +130,51 @@ const MemoizedRow = React.memo(
             {flexRender(cell.column.columnDef.cell, cell.getContext())}
           </TableCell>
         ))}
-      </tr>
+      </TableRow>
     );
   },
-  // Custom comparator: only re-render when this row's data or error version changes.
-  // saveNewRow / saveEditedRow / errorsRef are stable references.
-  (prev, next) =>
-    prev.row.original === next.row.original &&
-    prev.rowErrorVersion === next.rowErrorVersion
+  (prevProps, nextProps) => {
+    const prevData = prevProps.row.original;
+    const nextData = nextProps.row.original;
+
+    // Re-render if any of the data fields have changed
+    const keys = [
+      "date",
+      "challanNo",
+      "fromParty",
+      "toParty",
+      "weightValue",
+      "weightUnit",
+      "destination",
+      "amount",
+      "status",
+      "mode",
+      "isNew",
+      "isEdited",
+      "id",
+      "tempId"
+    ];
+    for (const key of keys) {
+      if (prevData[key] !== nextData[key]) {
+        return false;
+      }
+    }
+
+    // Re-render if the error version has changed
+    if (prevProps.rowErrorVersion !== nextProps.rowErrorVersion) {
+      return false;
+    }
+
+    return true;
+  }
 );
 
 export function DataTable<TData, TValue>({
   columns,
   data: initialData,
-  virtualize = false,
-  tableHeight = "560px",
+  totalCount = 0,
+  pageIndex = 0,
+  pageSize = 50,
   mode = "entry",
   searchValue = "",
   onSearchChange,
@@ -143,45 +184,34 @@ export function DataTable<TData, TValue>({
   onEndDateChange,
   statusFilter = "all",
   onStatusFilterChange,
-  onApplyFilters,
-  onApplyStatusFilter,
   appliedFilters,
+  onApplyFilters,
   onClearDate,
   onClearStatus,
   onClearAll,
   onExportExcel,
-  totalCount,
-  pageIndex = 0,
-  pageSize,
+  activeRegister,
 }: DataTableProps<TData, TValue>) {
-  const router = useRouter();
-  // Ref for the virtualised scroll container (also used in non-virtual mode, harmlessly)
-  const parentRef = React.useRef<HTMLDivElement>(null);
-  const [data, setData] = React.useState<any[]>(initialData);
-  const [sorting, setSorting] = React.useState<SortingState>([{ id: "srNo", desc: true }]);
-  const [autocompleteData, setAutocompleteData] = React.useState<any>({});
-  const [errors, setErrors] = React.useState<ValidationErrors>({});
-  // Stable ref so tableMeta never rebuilds when errors change
-  const errorsRef = React.useRef<ValidationErrors>(errors);
-  errorsRef.current = errors;
-  // Per-row error version — only the affected row re-renders on error changes
-  const [rowErrorVersions, setRowErrorVersions] = React.useState<Record<string, number>>({});
-  const bumpRowErrorVersion = React.useCallback((id: string) => {
-    setRowErrorVersions((v) => ({ ...v, [id]: (v[id] || 0) + 1 }));
-  }, []);
+  const [data, setData] = useState<LocalRow[]>([]);
+  const { refreshRegisters } = useRegisters();
+  const dataRef = useRef<LocalRow[]>([]);
+  const tableRef = useRef<any>(null);
 
-  // Snapshot of originally-loaded data for per-row tracking
-  const originalDataRef = React.useRef<Record<string, any>>({});
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
 
-  // Always-current ref — avoids stale closures in setTimeout callbacks
-  const dataRef = React.useRef<any[]>(data);
-  dataRef.current = data;
+  const [sorting, setSorting] = useState<SortingState>([
+    { id: "srNo", desc: true }
+  ]);
 
-  // Guard: prevent double-save when Save button is clicked rapidly
-  const isSavingRef = React.useRef(false);
+  const [autocompleteData, setAutocompleteData] = useState<{
+    fromParties: string[];
+    toParties: string[];
+    destinations: string[];
+  }>({ fromParties: [], toParties: [], destinations: [] });
 
-  // Batch Defaults State
-  const [batchDefaults, setBatchDefaults] = React.useState({
+  const [batchDefaults, setBatchDefaults] = useState<BatchDefaults>({
     date: new Date().toISOString().split("T")[0],
     fromParty: "",
     destination: "",
@@ -190,326 +220,416 @@ export function DataTable<TData, TValue>({
     status: "Account",
     mode: "Surface",
   });
-  const [useBatchDefaults, setUseBatchDefaults] = React.useState(true);
+  const [useBatchDefaults, setUseBatchDefaults] = useState(false);
 
-  React.useEffect(() => {
-    setData(initialData);
-    // Snapshot original data on initial load
-    const snapshot: Record<string, any> = {};
-    (initialData as any[]).forEach((r) => {
-      if (r.id) snapshot[r.id] = { ...r };
-    });
-    originalDataRef.current = snapshot;
+  const errorsRef = useRef<ValidationErrors>({});
+  const [rowErrorVersions, setRowErrorVersions] = useState<Record<string, number>>({});
+  const nextChallanRef = useRef<number | null>(null);
+  const isSavingRef = useRef(false);
+
+  const isReadOnly = activeRegister?.status === "Locked" || activeRegister?.status === "Archived";
+
+  let minMaxProps: { min?: string; max?: string } = {};
+  if (activeRegister) {
+    const { month, year } = activeRegister;
+    const pad = (num: number) => String(num).padStart(2, '0');
+    const minDate = `${year}-${pad(month)}-01`;
+    const lastDay = new Date(year, month, 0).getDate();
+    const maxDate = `${year}-${pad(month)}-${pad(lastDay)}`;
+    minMaxProps = { min: minDate, max: maxDate };
+  }
+
+  const triggerRowErrorUpdate = useCallback((identifier: string) => {
+    setRowErrorVersions((prev) => ({
+      ...prev,
+      [identifier]: (prev[identifier] || 0) + 1,
+    }));
+  }, []);
+
+  const clearFieldError = useCallback(
+    (identifier: string, columnId: string) => {
+      if (errorsRef.current[identifier]?.[columnId]) {
+        delete errorsRef.current[identifier][columnId];
+        if (Object.keys(errorsRef.current[identifier]).length === 0) {
+          delete errorsRef.current[identifier];
+        }
+        triggerRowErrorUpdate(identifier);
+      }
+    },
+    [triggerRowErrorUpdate]
+  );
+
+  const clearAllRowErrors = useCallback(
+    (identifier: string) => {
+      if (errorsRef.current[identifier]) {
+        delete errorsRef.current[identifier];
+        triggerRowErrorUpdate(identifier);
+      }
+    },
+    [triggerRowErrorUpdate]
+  );
+
+  useEffect(() => {
+    if (activeRegister) {
+      const { month, year } = activeRegister;
+      const pad = (num: number) => String(num).padStart(2, '0');
+      const today = new Date();
+      let defaultDay = pad(today.getDate());
+      const lastDayInMonth = new Date(year, month, 0).getDate();
+      if (today.getMonth() + 1 !== month || today.getFullYear() !== year) {
+        defaultDay = "01";
+      } else if (today.getDate() > lastDayInMonth) {
+        defaultDay = pad(lastDayInMonth);
+      }
+      setBatchDefaults((prev) => ({
+        ...prev,
+        date: `${year}-${pad(month)}-${defaultDay}`,
+      }));
+    }
+  }, [activeRegister]);
+
+  useEffect(() => {
+    const fetchNextChallan = async () => {
+      try {
+        const regParam = activeRegister?.id ? `?registerId=${activeRegister.id}` : "";
+        const res = await fetch(`/api/couriers/next-challan${regParam}`);
+        if (res.ok) {
+          const json = await res.json();
+          const val = json.data?.nextChallanNo ?? json.nextChallanNo ?? json.nextChallan;
+          if (val && !isNaN(Number(val))) {
+            nextChallanRef.current = Number(val);
+          }
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    fetchNextChallan();
+  }, [activeRegister]);
+
+  useEffect(() => {
+    setData(initialData as unknown as LocalRow[]);
   }, [initialData]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     const fetchAutocomplete = async () => {
-      const data = await getAutocompleteData();
-      setAutocompleteData(data);
+      try {
+        const data = await getAutocompleteData();
+        setAutocompleteData(data);
+      } catch (e) {
+        console.error(e);
+      }
     };
     fetchAutocomplete();
   }, []);
 
-  // ─────────────────────────────────────────────
-  // Validation helpers
-  // ─────────────────────────────────────────────
-
-  const setFieldError = React.useCallback(
-    (id: string, col: string, msg: string) => {
-      setErrors((p) => {
-        const next = { ...p, [id]: { ...(p[id] || {}), [col]: msg } };
-        errorsRef.current = next;
-        return next;
-      });
-      bumpRowErrorVersion(id);
-    },
-    [bumpRowErrorVersion]
-  );
-
-  const clearFieldError = React.useCallback(
-    (id: string, col: string) => {
-      setErrors((p) => {
-        const e = { ...(p[id] || {}) };
-        delete e[col];
-        const next = { ...p, [id]: e };
-        errorsRef.current = next;
-        return next;
-      });
-      bumpRowErrorVersion(id);
-    },
-    [bumpRowErrorVersion]
-  );
-
-  // Bulk error helpers used by save functions
-  const setRowErrors = React.useCallback(
-    (id: string, rowErrs: Record<string, string>) => {
-      setErrors((p) => {
-        const next = { ...p, [id]: rowErrs };
-        errorsRef.current = next;
-        return next;
-      });
-      bumpRowErrorVersion(id);
-    },
-    [bumpRowErrorVersion]
-  );
-
-  const clearRowErrors = React.useCallback(
-    (id: string) => {
-      setErrors((p) => {
-        const u = { ...p };
-        delete u[id];
-        errorsRef.current = u;
-        return u;
-      });
-      bumpRowErrorVersion(id);
-    },
-    [bumpRowErrorVersion]
-  );
-
-  const validateField = (
-    columnId: string,
-    value: any,
-    rowIdentifier: string,
-    allData: any[]
-  ): string => {
-    if (columnId === "weightValue") {
-      const v = Number(value);
-      if (isNaN(v)) return "Must be numeric";
-    }
-    if (columnId === "amount") {
-      const v = String(value ?? "").trim();
-      if (v !== "" && isNaN(Number(v))) return "Invalid amount";
-    }
-    if (columnId === "challanNo") {
-      const c = String(value ?? "").trim();
-      if (c !== "") {
-        const dup = allData.some((r) => {
-          // Only compare against SAVED rows (have an id, no tempId)
-          // Ignore other new/unsaved rows and the current row itself
-          const rIdentifier = r.tempId || r.id;
-          if (rIdentifier === rowIdentifier) return false; // skip self
-          if (r.isNew) return false; // skip other unsaved rows
-          return String(r.challanNo ?? "").trim() === c;
-        });
-        if (dup)
-          return "Duplicate challan";
-      }
-    }
-    return "";
-  };
-
-  const validateRow = (row: any, allData: any[]): Record<string, string> => {
-    const errs: Record<string, string> = {};
-    const id = row.tempId || row.id;
-    if (!row.isNew && !String(row.challanNo ?? "").trim()) errs.challanNo = "Required";
-    if (!String(row.fromParty ?? "").trim()) errs.fromParty = "Required";
-    if (!String(row.toParty ?? "").trim()) errs.toParty = "Required";
-    if (!String(row.destination ?? "").trim()) errs.destination = "Required";
-
-    ["weightValue", "amount", "challanNo"].forEach((col) => {
-      if (!errs[col]) {
-        const m = validateField(col, row[col], id, allData);
-        if (m) errs[col] = m;
-      }
+  const learnAutocompleteValues = useCallback((fromParty?: string, toParty?: string, destination?: string) => {
+    setAutocompleteData((prev) => {
+      const updateList = (list: string[], val?: string) => {
+        if (!val || !val.trim()) return list;
+        const trimmed = val.trim();
+        const filtered = list.filter((i) => i.toLowerCase() !== trimmed.toLowerCase());
+        return [trimmed, ...filtered];
+      };
+      return {
+        fromParties: updateList(prev.fromParties || [], fromParty),
+        toParties: updateList(prev.toParties || [], toParty),
+        destinations: updateList(prev.destinations || [], destination),
+      };
     });
-    return errs;
-  };
-
-  // ─────────────────────────────────────────────
-  // updateData — in-memory only; no auto-PATCH
-  // For saved rows this marks them as isEdited = true.
-  // API calls happen only via saveNewRow or saveEditedRow.
-  // ─────────────────────────────────────────────
-
-  const updateData = React.useCallback(
-    (identifier: string, columnId: string, value: any) => {
-      const finalValue =
-        (columnId === "fromParty" || columnId === "toParty" || columnId === "destination") &&
-          typeof value === "string"
-          ? capitalizeWords(value)
-          : value;
-
-      // Field-level validation
-      const errMsg = validateField(columnId, finalValue, identifier, dataRef.current);
-      if (errMsg) {
-        setFieldError(identifier, columnId, errMsg);
-      } else {
-        clearFieldError(identifier, columnId);
-      }
-
-      // Granular update — only mutate the specific row, not the whole array
-      setData((old) => {
-        const idx = old.findIndex(
-          (r) => (r.tempId && r.tempId === identifier) || (r.id && r.id === identifier)
-        );
-        if (idx === -1) return old;
-        const updated = { ...old[idx], [columnId]: finalValue };
-        if (old[idx].id && !old[idx].isNew) updated.isEdited = true;
-        const next = old.slice();
-        next[idx] = updated;
-        return next;
-      });
-    },
-    [setFieldError, clearFieldError]
-  );
-
-  const deleteRow = React.useCallback(
-    async (id: string, identifier: string) => {
-      if (!id) {
-        clearRowErrors(identifier);
-        setData((old) => old.filter((r) => (r.tempId || r.id) !== identifier));
-        return;
-      }
-      if (!confirm("Delete this entry?")) return;
-      try {
-        const res = await fetch(`/api/couriers/${id}`, { method: "DELETE" });
-        if (res.ok) {
-          clearRowErrors(identifier);
-          toast.success("Deleted");
-          setData((old) => old.filter((r) => r.id !== id));
-          router.refresh();
-        } else toast.error("Failed to delete");
-      } catch {
-        toast.error("Network error");
-      }
-    },
-    [router, clearRowErrors]
-  );
-
-  // ─────────────────────────────────────────────
-  // New row helpers
-  // ─────────────────────────────────────────────
-
-
-
-  /**
-   * Pure factory — builds a completely clean new row object.
-   * NEVER copies from the previous row. Challan is passed in from outside
-   * so it is always calculated from committed state.
-   */
-  const createCleanRow = React.useCallback((nextChallan: string) => ({
-    tempId: `new-${Date.now()}-${Math.random()}`,
-    srNo: 999999999,
-    date: useBatchDefaults ? batchDefaults.date : new Date().toISOString().split("T")[0],
-    challanNo: nextChallan,
-    fromParty: useBatchDefaults ? batchDefaults.fromParty : "",
-    toParty: "",
-    weightValue: useBatchDefaults ? parseFloat(batchDefaults.weightNum) || 0 : 100,
-    weightUnit: useBatchDefaults ? batchDefaults.weightUnit : "gm",
-    destination: useBatchDefaults ? batchDefaults.destination : "",
-    amount: "",
-    status: useBatchDefaults ? batchDefaults.status : "Account",
-    mode: useBatchDefaults ? batchDefaults.mode : "Surface",
-    isNew: true,
-  }), [useBatchDefaults, batchDefaults]);
-
-  /**
-   * Pure helper — computes the next challan number from a locally available snapshot for UI prediction.
-   */
-  const getNextChallan = React.useCallback((d: any[]): string => {
-    const validRows = d.filter((r) => !r.isNew && String(r.challanNo).toLowerCase() !== "auto");
-    if (validRows.length === 0) return "1001";
-
-    // d is already sorted newest-first, so the first valid row is the most recently created.
-    const lastChallan = Number(validRows[0].challanNo);
-    return !isNaN(lastChallan) && lastChallan > 0 ? String(lastChallan + 1) : "1001";
   }, []);
 
-  const addEmptyRow = React.useCallback(async (): Promise<string | undefined> => {
-    // Read errors from ref to avoid stale deps
-    const hasErrors = Object.values(errorsRef.current).some((e) => Object.keys(e).length > 0);
-    if (hasErrors) {
-      toast.warning("Please fix validation errors before adding a new row.");
-      return;
+  const getNextChallan = useCallback((d: LocalRow[]): number => {
+    let maxLocalChallan = 0;
+    if (d && d.length > 0) {
+      d.forEach((r) => {
+        const num = Number(r.challanNo);
+        if (!isNaN(num) && num > maxLocalChallan) {
+          maxLocalChallan = num;
+        }
+      });
     }
-    if (dataRef.current.some((r) => r.isNew)) {
-      toast.warning("Please save the current new row before adding another.");
-      return;
+    const dbNext = nextChallanRef.current || 1001;
+    return maxLocalChallan > 0 ? Math.max(maxLocalChallan + 1, dbNext) : dbNext;
+  }, []);
+
+  const addEmptyRow = useCallback(async (): Promise<string | null> => {
+    if (activeRegister?.status === "Locked" || activeRegister?.status === "Archived") {
+      toast.error(`Cannot add entries to a ${activeRegister.status.toLowerCase()} register.`);
+      return null;
     }
 
-    const tempId = `new-${Date.now()}-${Math.random()}`;
-    // Zero-lag instant prediction to eliminate Vercel serverless cold starts
+    const hasUnsavedNewRow = dataRef.current.some((r) => r.isNew);
+    if (hasUnsavedNewRow) {
+      toast.error("Please save the current unsaved row before adding another one.");
+      return null;
+    }
+
     const nextChallan = getNextChallan(dataRef.current);
+    const tempId = `temp-${Date.now()}`;
+    let rowDate = new Date().toISOString().split("T")[0];
+    if (activeRegister) {
+      const { month, year } = activeRegister;
+      const pad = (num: number) => String(num).padStart(2, '0');
+      const today = new Date();
+      if (today.getMonth() + 1 === month && today.getFullYear() === year) {
+        rowDate = today.toISOString().split("T")[0];
+      } else {
+        rowDate = `${year}-${pad(month)}-01`;
+      }
+    }
 
-    setData((committed) => {
-      const newRow = {
-        ...createCleanRow(nextChallan),
-        tempId,
-      };
-      return [newRow, ...committed];
-    });
+    const newRow: LocalRow = {
+      id: tempId,
+      tempId,
+      date: useBatchDefaults && batchDefaults.date ? batchDefaults.date : rowDate,
+      challanNo: nextChallan,
+      fromParty: useBatchDefaults ? batchDefaults.fromParty : "",
+      toParty: "",
+      weightValue: useBatchDefaults ? parseFloat(batchDefaults.weightNum) || 100 : 100,
+      weightUnit: useBatchDefaults ? batchDefaults.weightUnit : "gm",
+      destination: useBatchDefaults ? batchDefaults.destination : "",
+      amount: 30,
+      status: useBatchDefaults ? batchDefaults.status : "Account",
+      mode: useBatchDefaults ? batchDefaults.mode : "Surface",
+      isNew: true,
+      registerId: activeRegister?.id || null,
+    };
 
+    setData((prev) => [newRow, ...prev]);
     return tempId;
-  }, [createCleanRow, getNextChallan]);
+  }, [useBatchDefaults, batchDefaults, activeRegister, getNextChallan]);
 
-  // ─────────────────────────────────────────────
-  // Save a brand-new row (POST)
-  // Returns the tempId of the newly added follow-on row, or null on failure.
-  // ─────────────────────────────────────────────
+  const updateData = useCallback(
+    (identifier: string, columnId: string, value: unknown) => {
+      const parsedValue = columnId === "amount" || columnId === "challanNo" ? (parseFloat(value as string) || 0) : value;
+      const next = dataRef.current.map((row) => {
+        const rowKey = row.tempId || row.id;
+        if (rowKey === identifier) {
+          const updated = {
+            ...row,
+            [columnId]: parsedValue,
+            isEdited: !row.isNew ? true : row.isEdited,
+          };
 
-  const saveNewRow = React.useCallback(
-    async (
-      identifier: string,
-      addNextRow = false
-    ): Promise<{ success: boolean; nextTempId?: string }> => {
-      // Guard: prevent double-save
+          if (columnId === "weightValue" || columnId === "weightUnit") {
+            const wVal = columnId === "weightValue" ? (parsedValue as number) : row.weightValue;
+            const wUnit = columnId === "weightUnit" ? (parsedValue as string) : row.weightUnit;
+            const weightInGrams = wUnit === "kg" ? wVal * 1000 : wVal;
+            if (weightInGrams > 0) {
+              const calculatedAmount = Math.max(30, Math.ceil(weightInGrams / 100) * 10);
+              updated.amount = calculatedAmount;
+            }
+          }
+          return updated;
+        }
+        return row;
+      });
+      dataRef.current = next;
+      setData(next);
+    },
+    []
+  );
+
+  const deleteRow = useCallback(async (id: string, identifier: string) => {
+    if (activeRegister?.status === "Locked" || activeRegister?.status === "Archived") {
+      toast.error(`Cannot delete entries from a ${activeRegister.status.toLowerCase()} register.`);
+      return;
+    }
+
+    if (identifier.startsWith("temp-")) {
+      setData((prev) => prev.filter((r) => (r.tempId || r.id) !== identifier));
+      clearAllRowErrors(identifier);
+      toast.success("Row removed");
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/couriers/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setData((prev) => prev.filter((r) => r.id !== id));
+        clearAllRowErrors(identifier);
+        toast.success("Courier entry deleted");
+        refreshRegisters();
+      } else {
+        const err = await res.json();
+        toast.error(err.error || "Failed to delete entry");
+      }
+    } catch (e) {
+      toast.error("Network error while deleting entry");
+    }
+  }, [clearAllRowErrors, activeRegister]);
+
+  const validateRow = useCallback((row: LocalRow): Record<string, string> => {
+    const errs: Record<string, string> = {};
+
+    // 1. Date
+    if (!row.date || !String(row.date).trim()) {
+      errs.date = "Required";
+    }
+
+    // 2. Challan No (Numeric, > 0, Unique)
+    if (row.challanNo === undefined || row.challanNo === null || String(row.challanNo).trim() === "") {
+      errs.challanNo = "Required";
+    } else {
+      const numChallan = Number(row.challanNo);
+      if (isNaN(numChallan) || numChallan <= 0) {
+        errs.challanNo = "Invalid";
+      } else {
+        const currentIdentifier = row.tempId || row.id;
+        const isDuplicate = dataRef.current.some(
+          (r) => (r.tempId || r.id) !== currentIdentifier && String(r.challanNo) === String(row.challanNo)
+        );
+        if (isDuplicate) {
+          errs.challanNo = "Duplicate";
+        }
+      }
+    }
+
+    // 3. From Party
+    if (!row.fromParty || !String(row.fromParty).trim()) {
+      errs.fromParty = "Required";
+    }
+
+    // 4. To Party
+    if (!row.toParty || !String(row.toParty).trim()) {
+      errs.toParty = "Required";
+    }
+
+    // 5. Weight Value
+    if (row.weightValue === undefined || row.weightValue === null || String(row.weightValue).trim() === "") {
+      errs.weightValue = "Required";
+    } else {
+      const numWeight = Number(row.weightValue);
+      if (isNaN(numWeight) || numWeight <= 0) {
+        errs.weightValue = "Invalid";
+      }
+    }
+
+    // 6. Weight Unit
+    if (!row.weightUnit || !String(row.weightUnit).trim()) {
+      errs.weightUnit = "Required";
+    }
+
+    // 7. Destination
+    if (!row.destination || !String(row.destination).trim()) {
+      errs.destination = "Required";
+    }
+
+    // 8. Status
+    if (!row.status || !String(row.status).trim()) {
+      errs.status = "Required";
+    }
+
+    // 9. Mode
+    if (!row.mode || !String(row.mode).trim()) {
+      errs.mode = "Required";
+    }
+
+    return errs;
+  }, []);
+
+  const saveNewRow = useCallback(
+    async (identifier: string, addNextRow = false): Promise<{ success: boolean; nextTempId?: string }> => {
+      if (activeRegister?.status === "Locked" || activeRegister?.status === "Archived") {
+        toast.error(`Cannot save entries to a ${activeRegister.status.toLowerCase()} register.`);
+        return { success: false };
+      }
+
       if (isSavingRef.current) return { success: false };
       isSavingRef.current = true;
 
       const currentData = dataRef.current;
-      const rowData = currentData.find(
-        (r) => (r.tempId && r.tempId === identifier) || (r.id && r.id === identifier)
-      );
-      if (!rowData) {
+      const targetRow = currentData.find((r) => (r.tempId || r.id) === identifier);
+      if (!targetRow) {
         isSavingRef.current = false;
         return { success: false };
       }
 
-      const rowErrors = validateRow(rowData, currentData);
-      if (Object.keys(rowErrors).length > 0) {
-        setRowErrors(identifier, rowErrors);
+      const fieldErrs = validateRow(targetRow);
+      if (Object.keys(fieldErrs).length > 0) {
+        errorsRef.current[identifier] = fieldErrs;
+        triggerRowErrorUpdate(identifier);
         toast.warning("Please fill all required fields before saving.");
         isSavingRef.current = false;
         return { success: false };
       }
-      clearRowErrors(identifier);
 
-      const cleanedNew = {
-        ...rowData,
-        fromParty: capitalizeWords(rowData.fromParty || ""),
-        toParty: capitalizeWords(rowData.toParty || ""),
-        destination: capitalizeWords(rowData.destination || ""),
-        challanNo: String(rowData.challanNo).trim(),
-        amount: parseFloat(String(rowData.amount)) || 0,
-        tempId: undefined,
-        isNew: undefined,
-        isEdited: undefined,
+      clearAllRowErrors(identifier);
+
+      const payload = {
+        date: targetRow.date,
+        challanNo: targetRow.challanNo,
+        fromParty: capitalizeWords(targetRow.fromParty || ""),
+        toParty: capitalizeWords(targetRow.toParty || ""),
+        weightValue: targetRow.weightValue,
+        weightUnit: targetRow.weightUnit,
+        destination: capitalizeWords(targetRow.destination || ""),
+        amount: targetRow.amount,
+        status: targetRow.status,
+        mode: targetRow.mode,
+        registerId: activeRegister?.id || targetRow.registerId || null,
       };
 
       // ── OPTIMISTIC UI: Instant visual update + spawn new row ──
-      const nextTempId = addNextRow ? `new-${Date.now()}-${Math.random()}` : undefined;
-      const predictedChallan = !isNaN(Number(rowData.challanNo))
-        ? String(Number(rowData.challanNo) + 1)
+      const nextTempId = addNextRow ? `temp-${Date.now()}` : undefined;
+      const predictedChallan = !isNaN(Number(targetRow.challanNo))
+        ? Number(targetRow.challanNo) + 1
         : getNextChallan(currentData);
 
       setData((committed) => {
         let updated = committed.map((r) => {
-          if ((r.tempId && r.tempId === identifier) || (r.id && r.id === identifier)) {
-            // Fake that it's saved to unblock UI interaction instantly
-            return { ...r, isNew: false, tempId: r.tempId || identifier, isEdited: false };
+          if ((r.tempId || r.id) === identifier) {
+            return {
+              ...r,
+              fromParty: payload.fromParty,
+              toParty: payload.toParty,
+              destination: payload.destination,
+              isNew: false,
+              isEdited: false
+            };
           }
           return r;
         });
 
         if (addNextRow && nextTempId) {
-          const freshRow = { ...createCleanRow(predictedChallan), tempId: nextTempId };
+          let rowDate = new Date().toISOString().split("T")[0];
+          if (activeRegister) {
+            const { month, year } = activeRegister;
+            const pad = (num: number) => String(num).padStart(2, '0');
+            const today = new Date();
+            if (today.getMonth() + 1 === month && today.getFullYear() === year) {
+              rowDate = today.toISOString().split("T")[0];
+            } else {
+              rowDate = `${year}-${pad(month)}-01`;
+            }
+          }
+
+          const freshRow: LocalRow = {
+            id: nextTempId,
+            tempId: nextTempId,
+            date: useBatchDefaults && batchDefaults.date ? batchDefaults.date : rowDate,
+            challanNo: predictedChallan,
+            fromParty: useBatchDefaults ? batchDefaults.fromParty : "",
+            toParty: "",
+            weightValue: useBatchDefaults ? parseFloat(batchDefaults.weightNum) || 100 : 100,
+            weightUnit: useBatchDefaults ? batchDefaults.weightUnit : "gm",
+            destination: useBatchDefaults ? batchDefaults.destination : "",
+            amount: 30,
+            status: useBatchDefaults ? batchDefaults.status : "Account",
+            mode: useBatchDefaults ? batchDefaults.mode : "Surface",
+            isNew: true,
+            registerId: activeRegister?.id || null,
+          };
           return [freshRow, ...updated];
         }
         return updated;
       });
 
-      // Release guard lock early so they can save the *next* row instantly
-      setTimeout(() => { isSavingRef.current = false; }, 50);
+      // Synchronize dataRef.current immediately with the optimistic state
+      setTimeout(() => {
+        isSavingRef.current = false;
+      }, 50);
 
       // ── BACKGROUND SAVE ──
       (async () => {
@@ -517,415 +637,432 @@ export function DataTable<TData, TValue>({
           const res = await fetch("/api/couriers", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(cleanedNew),
+            body: JSON.stringify(payload),
           });
 
-          if (!res.ok) {
-            toast.error((await res.text()) || "Error saving row");
-            return;
+          if (res.ok) {
+            const resJson = await res.json();
+            const saved: CourierEntry = resJson.data || resJson;
+            toast.success("Courier entry saved!");
+            refreshRegisters();
+            learnAutocompleteValues(payload.fromParty, payload.toParty, payload.destination);
+            clearAutocompleteCache();
+            
+            // Update cached next challan
+            nextChallanRef.current = Number(saved.challanNo) + 1;
+
+            setData((committed) => {
+              const next = committed.map((r) => {
+                if (r.tempId === identifier || r.id === identifier) {
+                  return {
+                    ...r,
+                    id: saved.id,
+                    srNo: saved.srNo ?? undefined,
+                    challanNo: saved.challanNo,
+                    tempId: undefined,
+                    isNew: false,
+                    isEdited: false
+                  };
+                }
+                return r;
+              });
+              dataRef.current = next;
+              return next;
+            });
+          } else {
+            const err = await res.json().catch(() => ({}));
+            toast.error(err.error || `Failed to save entry (${res.status})`);
+            // Rollback optimistic state on failure
+            setData((committed) => {
+              const next = committed.map((r) => {
+                if (r.id === identifier || r.tempId === identifier) {
+                  return { ...r, isNew: true };
+                }
+                return r;
+              });
+              dataRef.current = next;
+              return next;
+            });
           }
-
-          const jsonBody = await res.json();
-          const saved = jsonBody.data || jsonBody;
-          clearAutocompleteCache();
-
-          setData((committed) =>
-            committed.map((r) => {
-              if (r.tempId === identifier || r.id === identifier) {
-                // Apply final real backend DB row values silently
-                return { ...r, id: saved.id, srNo: saved.srNo, challanNo: String(saved.challanNo), tempId: undefined };
+        } catch (e) {
+          toast.error("Network error while saving entry");
+          // Rollback optimistic state on failure
+          setData((committed) => {
+            const next = committed.map((r) => {
+              if (r.id === identifier || r.tempId === identifier) {
+                return { ...r, isNew: true };
               }
               return r;
-            })
-          );
-          originalDataRef.current[saved.id] = { ...saved };
-        } catch (err) {
-          toast.error("Network error while saving");
+            });
+            dataRef.current = next;
+            return next;
+          });
         }
       })();
 
-      // Return instantly to UI for rapid auto-focusing without waiting for the server
       return { success: true, nextTempId };
     },
-    [createCleanRow, getNextChallan, setRowErrors, clearRowErrors]
+    [validateRow, activeRegister, getNextChallan, useBatchDefaults, batchDefaults, refreshRegisters, learnAutocompleteValues]
   );
 
-  // ─────────────────────────────────────────────
-  // Save edits to an existing row (PATCH all fields)
-  // ─────────────────────────────────────────────
-
-  const saveEditedRow = React.useCallback(
-    async (identifier: string) => {
-      const rowData = dataRef.current.find((r) => r.id === identifier);
-      if (!rowData) return;
-
-      const rowErrors = validateRow(rowData, dataRef.current);
-      if (Object.keys(rowErrors).length > 0) {
-        setRowErrors(identifier, rowErrors);
-        toast.warning("Please fix validation errors before saving.");
-        return;
+  const saveEditedRow = useCallback(
+    async (identifier: string): Promise<boolean> => {
+      if (activeRegister?.status === "Locked" || activeRegister?.status === "Archived") {
+        toast.error(`Cannot modify entries in a ${activeRegister.status.toLowerCase()} register.`);
+        return false;
       }
-      clearRowErrors(identifier);
+
+      const targetRow = dataRef.current.find((r) => (r.tempId || r.id) === identifier);
+      if (!targetRow) return false;
+
+      const fieldErrs = validateRow(targetRow);
+      if (Object.keys(fieldErrs).length > 0) {
+        errorsRef.current[identifier] = fieldErrs;
+        triggerRowErrorUpdate(identifier);
+        toast.error("Please fix validation errors before saving.");
+        return false;
+      }
+
+      clearAllRowErrors(identifier);
+
+      const payload = {
+        date: targetRow.date,
+        challanNo: targetRow.challanNo,
+        fromParty: targetRow.fromParty,
+        toParty: targetRow.toParty,
+        weightValue: targetRow.weightValue,
+        weightUnit: targetRow.weightUnit,
+        destination: targetRow.destination,
+        amount: targetRow.amount,
+        status: targetRow.status,
+        mode: targetRow.mode,
+      };
 
       try {
-        const res = await fetch(`/api/couriers/${rowData.id}`, {
-          method: "PATCH",
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+        const res = await fetch(`/api/couriers/${targetRow.id}`, {
+          method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            date: rowData.date,
-            challanNo: String(rowData.challanNo).trim(),
-            fromParty: capitalizeWords(rowData.fromParty || ""),
-            toParty: capitalizeWords(rowData.toParty || ""),
-            weightValue: rowData.weightValue,
-            weightUnit: rowData.weightUnit,
-            destination: capitalizeWords(rowData.destination || ""),
-            amount: Number(rowData.amount),
-            status: rowData.status,
-            mode: rowData.mode,
-          }),
+          body: JSON.stringify(payload),
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId);
+
         if (res.ok) {
-          toast.success("Changes saved!");
-          setData((old) => old.map((r) => (r.id === identifier ? { ...r, isEdited: false } : r)));
-          originalDataRef.current[identifier] = { ...rowData, isEdited: false };
+          const next = dataRef.current.map((r) =>
+            (r.tempId || r.id) === identifier ? { ...r, isEdited: false } : r
+          );
+          dataRef.current = next;
+          setData(next);
+          toast.success("Courier entry updated!");
+          refreshRegisters();
+          learnAutocompleteValues(targetRow.fromParty, targetRow.toParty, targetRow.destination);
+          return true;
         } else {
-          toast.error((await res.text()) || "Failed to save changes");
+          const err = await res.json().catch(() => ({}));
+          if (res.status === 404) {
+            toast.error("Entry not found.");
+          } else if (res.status === 500) {
+            toast.error("Server error while saving.");
+          } else {
+            toast.error(err.error || `Error updating entry (${res.status})`);
+          }
+          return false;
         }
-      } catch {
-        toast.error("Network error");
+      } catch (e: any) {
+        if (e.name === "AbortError") {
+          toast.error("Request timed out. Please retry.");
+        } else if (typeof navigator !== "undefined" && !navigator.onLine) {
+          toast.error("You're offline. Please check your connection.");
+        } else {
+          toast.error("Network error while updating entry");
+        }
+        return false;
       }
     },
-    [setRowErrors, clearRowErrors]
+    [validateRow, clearAllRowErrors, triggerRowErrorUpdate, activeRegister]
   );
 
-  // ─────────────────────────────────────────────
-  // Keyboard navigation
-  // ─────────────────────────────────────────────
-
-  const handleCellKeyDown = React.useCallback(
+  const handleCellKeyDown = useCallback(
     (
       e: React.KeyboardEvent<HTMLInputElement>,
       identifier: string,
       columnId: string,
-      inputElement: HTMLInputElement | null
+      inputElement: HTMLInputElement | null,
+      tableInstance?: any
     ) => {
-      const colOrder = [
-        "date", "challanNo", "fromParty", "toParty",
-        "weightValue", "destination", "amount", "status", "mode",
-      ];
-      const idx = colOrder.indexOf(columnId);
-      const row = dataRef.current.find(
-        (r) => (r.tempId && r.tempId === identifier) || (r.id && r.id === identifier)
-      );
-      if (!row) return;
+      if (e.key !== "Enter") return;
+      e.preventDefault();
 
-      if (e.key === "Enter") {
-        e.preventDefault();
-        const nextCol = colOrder[idx + 1];
-        if (nextCol) {
-          const el = document.getElementById(`cell-${identifier}-${nextCol}`);
-          if (el) { el.focus(); return; }
+      const currentData = dataRef.current;
+      const targetRow = currentData.find((r) => (r.tempId || r.id) === identifier);
+      if (!targetRow) return;
+
+      // Check validation for the current field or row
+      const fieldErrs = validateRow(targetRow);
+
+      // If the currently edited field has a validation error (e.g. empty From Party), stop immediately
+      if (fieldErrs[columnId]) {
+        errorsRef.current[identifier] = {
+          ...(errorsRef.current[identifier] || {}),
+          [columnId]: fieldErrs[columnId],
+        };
+        triggerRowErrorUpdate(identifier);
+        inputElement?.focus();
+        const fieldLabel = columnId === "fromParty" ? "From Party" : columnId === "toParty" ? "To Party" : columnId === "challanNo" ? "Challan No" : columnId;
+        toast.error(`${fieldLabel} is ${fieldErrs[columnId].toLowerCase()}`);
+        return;
+      }
+
+      if (columnId === "amount") {
+        if (Object.keys(fieldErrs).length > 0) {
+          errorsRef.current[identifier] = fieldErrs;
+          triggerRowErrorUpdate(identifier);
+          const firstErrField = Object.keys(fieldErrs)[0];
+          const errEl = document.getElementById(`cell-${identifier}-${firstErrField}`);
+          if (errEl) {
+            errEl.focus();
+          } else if (inputElement) {
+            inputElement.focus();
+          }
+          toast.error("Please fill in all required fields marked in red.");
+          return;
+        }
+
+        clearAllRowErrors(identifier);
+
+        let savePromise: Promise<{ success: boolean; nextTempId?: string }>;
+        if (targetRow.isNew) {
+          savePromise = saveNewRow(identifier, true);
+        } else if (targetRow.isEdited) {
+          savePromise = saveEditedRow(identifier).then((succ) => ({ success: succ }));
+        } else {
+          savePromise = Promise.resolve({ success: true });
+        }
+
+        savePromise.then((res: any) => {
+          if (res.success) {
+            const nextIdentifier = res.nextTempId;
+            if (nextIdentifier) {
+              setTimeout(() => {
+                const nextFromPartyEl = document.getElementById(`cell-${nextIdentifier}-fromParty`) as HTMLInputElement | null;
+                if (nextFromPartyEl) {
+                  nextFromPartyEl.focus();
+                  nextFromPartyEl.select?.();
+                }
+              }, 50);
+            } else {
+              const tbl = tableInstance || tableRef.current;
+              const visibleRows = tbl ? tbl.getRowModel().rows : [];
+              const rowIndex = visibleRows.findIndex((r: any) => (r.original.tempId || r.original.id) === identifier);
+              if (rowIndex !== -1 && rowIndex + 1 < visibleRows.length) {
+                const nextRow = visibleRows[rowIndex + 1];
+                const nextId = (nextRow.original as any).tempId || (nextRow.original as any).id;
+                setTimeout(() => {
+                  const nextAmountEl = document.getElementById(`cell-${nextId}-amount`) as HTMLInputElement | null;
+                  if (nextAmountEl) {
+                    nextAmountEl.focus();
+                    nextAmountEl.select?.();
+                  }
+                }, 50);
+              }
+            }
+          } else {
+            inputElement?.focus();
+            inputElement?.select?.();
+          }
+        });
+        return;
+      }
+
+      const columnOrder = [
+        "date",
+        "challanNo",
+        "fromParty",
+        "toParty",
+        "weightValue",
+        "destination",
+        "amount",
+        "status",
+        "mode",
+      ];
+
+      const currentIndex = columnOrder.indexOf(columnId);
+
+      if (currentIndex !== -1 && currentIndex < columnOrder.length - 1) {
+        const nextCol = columnOrder[currentIndex + 1];
+        const nextEl = document.getElementById(`cell-${identifier}-${nextCol}`);
+        if (nextEl) {
+          nextEl.focus();
+        }
+      } else {
+        // Last field in row, validate full row before saving
+        if (Object.keys(fieldErrs).length > 0) {
+          errorsRef.current[identifier] = fieldErrs;
+          triggerRowErrorUpdate(identifier);
+          toast.error("Please fix validation errors before saving.");
+          return;
         }
         const saveBtn = document.getElementById(`save-btn-${identifier}`);
-        if (saveBtn) { saveBtn.focus(); return; }
-        inputElement
-          ?.closest("td")
-          ?.nextElementSibling?.querySelector<HTMLElement>("input, button[role='combobox'], button")
-          ?.focus();
-      }
-
-      if (e.ctrlKey && e.key === "s") {
-        e.preventDefault();
-        if (row.isNew) void saveNewRow(identifier, false);
-        else if (row.isEdited) saveEditedRow(identifier);
+        if (saveBtn) {
+          saveBtn.click();
+        }
       }
     },
-    [saveNewRow, saveEditedRow]
+    [validateRow, triggerRowErrorUpdate, clearAllRowErrors, saveNewRow, saveEditedRow]
   );
 
-  // ─────────────────────────────────────────────
-  // Table instance
-  // ─────────────────────────────────────────────
+  const exportExcel = useCallback(() => {
+    const exportRows = data.map((r, i) => ({
+      "Sr.No": i + 1,
+      Date: r.date ? new Date(r.date).toISOString().split("T")[0] : "",
+      "Challan No": r.challanNo,
+      "From Party": r.fromParty,
+      "To Party": r.toParty,
+      Weight: `${r.weightValue} ${r.weightUnit}`,
+      Destination: r.destination,
+      Amount: r.amount,
+      Status: r.status,
+      Mode: r.mode,
+    }));
 
-  const tableMeta = React.useMemo(
+    const worksheet = XLSX.utils.json_to_sheet(exportRows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Courier Entries");
+    XLSX.writeFile(workbook, `Courier_Entries_${new Date().toISOString().split("T")[0]}.xlsx`);
+  }, [data]);
+
+  const localRowOffset = useMemo(() => {
+    return data.filter((r) => r.isNew).length;
+  }, [data]);
+
+  const tableMeta = useMemo(
     () => ({
       updateData,
       deleteRow,
+      saveNewRow,
+      saveEditedRow,
       autocompleteData,
       handleCellKeyDown,
       errorsRef,
       clearFieldError,
-      saveNewRow,
-      saveEditedRow,
       mode,
-      filterProps: {
-        startDate: startDate || "",
+      totalCount,
+      pageIndex,
+      pageSize,
+      localRowOffset,
+      activeRegister,
+      filterProps: mode === "all" ? {
+        startDate,
         onStartDateChange: onStartDateChange || (() => { }),
-        endDate: endDate || "",
+        endDate,
         onEndDateChange: onEndDateChange || (() => { }),
-        statusFilter: statusFilter || "all",
+        statusFilter,
         onStatusFilterChange: onStatusFilterChange || (() => { }),
         onApplyFilters: onApplyFilters || (() => { }),
-        onApplyStatusFilter: onApplyStatusFilter || (() => { }),
-      },
-      pageIndex,
-      pageSize: pageSize || dataRef.current.length,
-      totalCount: totalCount !== undefined ? totalCount : dataRef.current.length,
-      localRowOffset: data.length - (initialData?.length || 0),
+        onApplyStatusFilter: (status: string) => {
+          onStatusFilterChange?.(status);
+          onApplyFilters?.();
+        }
+      } : undefined
     }),
-    [updateData, deleteRow, autocompleteData, handleCellKeyDown, clearFieldError, saveNewRow, saveEditedRow, mode, startDate, onStartDateChange, endDate, onEndDateChange, statusFilter, onStatusFilterChange, onApplyFilters, onApplyStatusFilter, pageIndex, pageSize, totalCount, data.length, initialData?.length]
+    [
+      updateData,
+      deleteRow,
+      saveNewRow,
+      saveEditedRow,
+      autocompleteData,
+      handleCellKeyDown,
+      clearFieldError,
+      mode,
+      totalCount,
+      pageIndex,
+      pageSize,
+      localRowOffset,
+      activeRegister,
+      startDate,
+      onStartDateChange,
+      endDate,
+      onEndDateChange,
+      statusFilter,
+      onStatusFilterChange,
+      onApplyFilters
+    ]
   );
 
   const table = useReactTable({
-    data,
+    data: data as unknown as TData[],
     columns,
-    defaultColumn: {
-      size: 140,
-      minSize: 60,
-      maxSize: 500,
-    },
-    getCoreRowModel: getCoreRowModel(),
-    onSortingChange: setSorting,
-    getSortedRowModel: getSortedRowModel(),
     state: { sorting },
+    onSortingChange: setSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
     meta: tableMeta,
   });
 
-  // ── Virtualizer — declared AFTER table so rows is available ──────────────
+  tableRef.current = table;
+
+  const parentRef = useRef<HTMLDivElement>(null);
   const rows = table.getRowModel().rows;
+  const virtualize = mode === "all";
+
   const rowVirtualizer = useVirtualizer({
     count: virtualize ? rows.length : 0,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 42,
-    overscan: 5,
+    estimateSize: () => 40,
+    overscan: 10,
   });
-  const virtualItems = rowVirtualizer.getVirtualItems();
-  const totalVirtualSize = rowVirtualizer.getTotalSize();
-  const paddingTop = virtualItems.length > 0 ? (virtualItems[0]?.start ?? 0) : 0;
+
+  const virtualItems = virtualize ? rowVirtualizer.getVirtualItems() : [];
+  const totalSize = virtualize ? rowVirtualizer.getTotalSize() : 0;
+  const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
   const paddingBottom =
     virtualItems.length > 0
-      ? totalVirtualSize - (virtualItems[virtualItems.length - 1]?.end ?? 0)
+      ? totalSize - virtualItems[virtualItems.length - 1].end
       : 0;
 
-  // ─────────────────────────────────────────────
-  // Excel Export
-  // ─────────────────────────────────────────────
-
-  // Removed local duplicate formatExportWeight. Now using src/lib/utils.ts formatWeight.
-
-  const exportExcel = () => {
-    // Navigate to the API route to download ALL entries without pagination
-    window.location.href = "/api/export/excel";
-  };
-
-  // ─────────────────────────────────────────────
-  // Render
-  // ─────────────────────────────────────────────
+  const tableHeight = useMemo(() => {
+    if (mode === "entry") {
+      return "calc(100vh - 145px)";
+    }
+    return "calc(100vh - 210px)";
+  }, [mode]);
 
   return (
-    <div className="space-y-2">
-      {/* Batch Default Settings */}
+    <div className="w-full space-y-1.5">
+      {/* Entry mode: Single consolidated card containing Default Date, Export Excel, and Add Courier */}
       {mode !== "all" && (
-        <div className="rounded-[20px] bg-white/40 dark:bg-slate-900/40 backdrop-blur-3xl border border-white/50 dark:border-white/10 shadow-[0_8px_32px_0_rgba(31,38,135,0.05)] p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <Settings2 className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-            <h3 className="text-lg font-semibold text-slate-800 dark:text-white">
-              Batch Default Settings
-            </h3>
-            <span className="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 px-2 py-1 rounded-full ml-2">
-              Applies to new rows
-            </span>
+        <div className="rounded-[14px] bg-white/40 dark:bg-slate-900/40 backdrop-blur-3xl border border-white/50 dark:border-white/10 shadow-sm px-3 py-1.5 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+              <span className="text-sm font-semibold text-slate-800 dark:text-white whitespace-nowrap">
+                Default Date:
+              </span>
+            </div>
+            <Input
+              type="date"
+              disabled={isReadOnly}
+              value={batchDefaults.date}
+              onChange={(e) => setBatchDefaults({ ...batchDefaults, date: e.target.value })}
+              className="bg-white/50 dark:bg-slate-800/50 border-white/30 dark:border-white/10 h-9 w-40 text-sm focus-visible:ring-1 focus-visible:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              {...minMaxProps}
+            />
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
-            <div className="space-y-2">
-              <Label className="text-slate-600 dark:text-slate-300">Date</Label>
-              <Input
-                type="date"
-                value={batchDefaults.date}
-                onChange={(e) => setBatchDefaults({ ...batchDefaults, date: e.target.value })}
-                className="bg-white/50 dark:bg-slate-800/50 border-white/30 dark:border-white/10 w-full"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-slate-600 dark:text-slate-300">From Party</Label>
-              <Input
-                value={batchDefaults.fromParty}
-                onChange={(e) => setBatchDefaults({ ...batchDefaults, fromParty: e.target.value })}
-                placeholder="Sender Name"
-                className="bg-white/50 dark:bg-slate-800/50 border-white/30 dark:border-white/10 w-full"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-slate-600 dark:text-slate-300">Destination</Label>
-              <Input
-                value={batchDefaults.destination}
-                onChange={(e) =>
-                  setBatchDefaults({ ...batchDefaults, destination: e.target.value })
-                }
-                placeholder="City / Hub"
-                className="bg-white/50 dark:bg-slate-800/50 border-white/30 dark:border-white/10 w-full"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-slate-600 dark:text-slate-300">Weight</Label>
-              <div className="flex bg-white/50 dark:bg-slate-800/50 border border-white/30 dark:border-white/10 rounded-md">
-                <Input
-                  value={batchDefaults.weightNum}
-                  onChange={(e) => setBatchDefaults({ ...batchDefaults, weightNum: e.target.value })}
-                  className="border-0 bg-transparent w-full text-right"
-                  placeholder="0.100"
-                />
-                <select
-                  value={batchDefaults.weightUnit}
-                  onChange={(e) =>
-                    setBatchDefaults({ ...batchDefaults, weightUnit: e.target.value })
-                  }
-                  className="bg-transparent px-2 outline-none border-l border-white/30 dark:border-white/10 text-slate-700 dark:text-slate-300 cursor-pointer"
-                >
-                  <option value="kg">kg</option>
-                  <option value="gm">gm</option>
-                </select>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-slate-600 dark:text-slate-300">Status</Label>
-              <Select
-                value={batchDefaults.status}
-                onValueChange={(v) => setBatchDefaults({ ...batchDefaults, status: v || "Account" })}
-              >
-                <SelectTrigger className="w-full bg-white/50 dark:bg-slate-800/50 border-white/30 dark:border-white/10 shadow-sm rounded-none">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {["Account", "Cash"].map((o) => (
-                    <SelectItem key={o} value={o}>{o}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-slate-600 dark:text-slate-300">Mode</Label>
-              <Select
-                value={batchDefaults.mode}
-                onValueChange={(v) => setBatchDefaults({ ...batchDefaults, mode: v || "Surface" })}
-              >
-                <SelectTrigger className="w-full bg-white/50 dark:bg-slate-800/50 border-white/30 dark:border-white/10 shadow-sm rounded-none">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {["Surface", "Air", "Cargo", "V Fast"].map((o) => (
-                    <SelectItem key={o} value={o}>{o}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="flex gap-4 mt-6">
-            <Button
-              onClick={() => setUseBatchDefaults(true)}
-              className="bg-blue-600 hover:bg-blue-700 text-white rounded-none shadow-md"
-            >
-              Apply Defaults
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() =>
-                setBatchDefaults({
-                  date: new Date().toISOString().split("T")[0],
-                  fromParty: "",
-                  destination: "",
-                  weightNum: "100",
-                  weightUnit: "gm",
-                  status: "Account",
-                  mode: "Surface",
-                })
-              }
-              className="rounded-none border-slate-300 dark:border-slate-700"
-            >
-              <RefreshCw className="w-4 h-4 mr-2" /> Reset
-            </Button>
-          </div>
-        </div>
-      )}
-
-      {/* Action Bar */}
-      <div className="flex flex-col gap-3 mb-2">
-        {mode === "all" && (
-          <>
-            <div className="flex flex-row gap-2 w-full items-center">
-              {/* Search */}
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  onApplyFilters?.();
-                  if (document.activeElement instanceof HTMLElement) {
-                    document.activeElement.blur();
-                  }
-                }}
-                className="relative flex-1 min-w-0 max-w-sm"
-              >
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
-                <Input
-                  type="search"
-                  enterKeyHint="search"
-                  placeholder="Search..."
-                  value={searchValue}
-                  onChange={(e) => onSearchChange?.(e.target.value)}
-                  className="pl-9 h-10 bg-white/10 dark:bg-slate-900/50 backdrop-blur-xl border border-white/20 dark:border-white/10 rounded-xl text-sm placeholder:text-slate-400 focus-visible:ring-1 focus-visible:ring-blue-500 shadow-sm"
-                />
-              </form>
-
-              {/* Export — pushed to far right */}
-              <Button
-                onClick={onExportExcel || exportExcel}
-                variant="outline"
-                className="ml-auto h-10 rounded-xl bg-white/10 dark:bg-slate-900/50 backdrop-blur-xl border border-white/20 dark:border-white/10 hover:bg-white/20 text-sm font-medium shadow-sm flex-shrink-0 px-3 sm:px-4"
-              >
-                <Download className="h-4 w-4 sm:mr-2" />
-                <span className="hidden sm:inline">Export Excel</span>
-              </Button>
-            </div>
-
-            {/* Active Filter Chips */}
-            {appliedFilters && ((appliedFilters.startDate && appliedFilters.endDate) || (appliedFilters.status && appliedFilters.status !== "all")) && (
-              <div className="flex flex-wrap items-center gap-2 mt-1">
-                {appliedFilters.startDate && appliedFilters.endDate && (
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 rounded-full text-xs font-medium">
-                    Date: {appliedFilters.startDate} – {appliedFilters.endDate}
-                    <button onClick={onClearDate} className="hover:bg-blue-500/20 rounded-full p-0.5 transition-colors"><X className="w-3 h-3" /></button>
-                  </div>
-                )}
-                {appliedFilters.status && appliedFilters.status !== "all" && (
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 rounded-full text-xs font-medium">
-                    Status: {appliedFilters.status}
-                    <button onClick={onClearStatus} className="hover:bg-purple-500/20 rounded-full p-0.5 transition-colors"><X className="w-3 h-3" /></button>
-                  </div>
-                )}
-                <button
-                  onClick={onClearAll}
-                  className="text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors ml-1"
-                >
-                  Clear All
-                </button>
-              </div>
-            )}
-          </>
-        )}
-
-        {/* Entry mode: just Add Courier + Export */}
-        {mode !== "all" && (
-          <div className="flex gap-2 items-center justify-end">
+          <div className="flex items-center gap-2 ml-auto">
             <Button
               onClick={onExportExcel || exportExcel}
               variant="outline"
-              className="h-9 rounded-xl bg-white/10 dark:bg-slate-900/50 backdrop-blur-xl border border-white/20 dark:border-white/10 hover:bg-white/20 text-sm font-medium shadow-sm px-3 sm:px-4"
+              className="h-9 rounded-xl bg-white/10 dark:bg-slate-900/50 backdrop-blur-xl border border-white/20 dark:border-white/10 hover:bg-white/20 text-sm font-medium shadow-sm px-3"
             >
               <Download className="h-4 w-4 sm:mr-2" />
               <span className="hidden sm:inline">Export Excel</span>
             </Button>
             <Button
+              disabled={isReadOnly}
               onClick={async () => {
                 const tempId = await addEmptyRow();
                 if (tempId) {
@@ -934,20 +1071,83 @@ export function DataTable<TData, TValue>({
                   }, 50);
                 }
               }}
-              className="h-9 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 shadow-lg shadow-blue-500/25 text-white font-semibold"
+              className="h-9 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 shadow-lg shadow-blue-500/25 text-white font-semibold text-sm px-3 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <PlusCircle className="mr-2 h-4 w-4" /> Add Courier
             </Button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* Reports / All mode Action Bar */}
+      {mode === "all" && (
+        <div className="flex flex-col gap-3 mb-2">
+          <div className="flex flex-row gap-2 w-full items-center">
+            {/* Search */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                onApplyFilters?.();
+                if (document.activeElement instanceof HTMLElement) {
+                  document.activeElement.blur();
+                }
+              }}
+              className="relative flex-1 min-w-0 max-w-sm"
+            >
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+              <Input
+                type="search"
+                enterKeyHint="search"
+                placeholder="Search..."
+                value={searchValue}
+                onChange={(e) => onSearchChange?.(e.target.value)}
+                className="pl-9 h-10 bg-white/10 dark:bg-slate-900/50 backdrop-blur-xl border border-white/20 dark:border-white/10 rounded-xl text-sm placeholder:text-slate-400 focus-visible:ring-1 focus-visible:ring-blue-500 shadow-sm"
+              />
+            </form>
+
+            {/* Export — pushed to far right */}
+            <Button
+              onClick={onExportExcel || exportExcel}
+              variant="outline"
+              className="ml-auto h-10 rounded-xl bg-white/10 dark:bg-slate-900/50 backdrop-blur-xl border border-white/20 dark:border-white/10 hover:bg-white/20 text-sm font-medium shadow-sm flex-shrink-0 px-3 sm:px-4"
+            >
+              <Download className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Export Excel</span>
+            </Button>
+          </div>
+
+          {/* Active Filter Chips */}
+          {appliedFilters && ((appliedFilters.startDate && appliedFilters.endDate) || (appliedFilters.status && appliedFilters.status !== "all")) && (
+            <div className="flex flex-wrap items-center gap-2 mt-1">
+              {appliedFilters.startDate && appliedFilters.endDate && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 rounded-full text-xs font-medium">
+                  Date: {appliedFilters.startDate} – {appliedFilters.endDate}
+                  <button onClick={onClearDate} className="hover:bg-blue-500/20 rounded-full p-0.5 transition-colors"><X className="w-3 h-3" /></button>
+                </div>
+              )}
+              {appliedFilters.status && appliedFilters.status !== "all" && (
+                <div className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20 rounded-full text-xs font-medium">
+                  Status: {appliedFilters.status}
+                  <button onClick={onClearStatus} className="hover:bg-purple-500/20 rounded-full p-0.5 transition-colors"><X className="w-3 h-3" /></button>
+                </div>
+              )}
+              <button
+                onClick={onClearAll}
+                className="text-xs font-medium text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors ml-1"
+              >
+                Clear All
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Table */}
-      <div className="rounded-none overflow-hidden bg-slate-900/40 backdrop-blur-xl border border-white/10 shadow-lg scrollbar-thin scrollbar-thumb-slate-700/50 scrollbar-track-transparent">
+      <div className="rounded-none overflow-hidden bg-slate-900/40 backdrop-blur-xl border border-white/10 shadow-lg scrollbar-thin scrollbar-thumb-slate-700/50 scrollbar-track-transparent flex flex-col">
         <div
           ref={parentRef}
-          className="overflow-x-auto scrollbar-thin scrollbar-thumb-slate-700/50 scrollbar-track-transparent"
-          style={virtualize ? { height: tableHeight, overflowY: "auto" } : undefined}
+          className="overflow-auto scrollbar-thin scrollbar-thumb-slate-700/50 scrollbar-track-transparent flex-1"
+          style={{ height: tableHeight, maxHeight: tableHeight, overflowY: "auto" }}
         >
           <Table className="w-full min-w-[1000px] table-fixed border-collapse">
             <TableHeader className="bg-white/5 dark:bg-slate-800/40 sticky top-0 z-10 backdrop-blur-md">
@@ -971,14 +1171,13 @@ export function DataTable<TData, TValue>({
             <TableBody>
               {rows.length ? (
                 virtualize ? (
-                  // ── Virtualised rows (only in-viewport rows rendered) ──
                   <>
                     {paddingTop > 0 && (
                       <tr><td style={{ height: paddingTop }} colSpan={columns.length + 1} /></tr>
                     )}
                     {virtualItems.map((vr) => {
                       const row = rows[vr.index];
-                      const identifier = row.original.tempId || row.original.id;
+                      const identifier = (row.original as any).tempId || (row.original as any).id;
                       return (
                         <MemoizedRow
                           key={row.id}
@@ -995,9 +1194,8 @@ export function DataTable<TData, TValue>({
                     )}
                   </>
                 ) : (
-                  // ── Normal rows (used when virtualize=false, e.g. 20-row entry page) ──
                   rows.map((row) => {
-                    const identifier = row.original.tempId || row.original.id;
+                    const identifier = (row.original as any).tempId || (row.original as any).id;
                     return (
                       <MemoizedRow
                         key={row.id}
@@ -1024,7 +1222,6 @@ export function DataTable<TData, TValue>({
           </Table>
         </div>
       </div>
-
     </div>
   );
 }

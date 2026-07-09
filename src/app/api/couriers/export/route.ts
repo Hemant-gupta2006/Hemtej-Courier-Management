@@ -18,9 +18,14 @@ export async function GET(req: Request) {
     const startDateParam = searchParams.get("startDate");
     const endDateParam = searchParams.get("endDate");
     const statusParam = searchParams.get("status");
+    const registerIdParam = searchParams.get("registerId");
 
     // Build unique where clause
     const where: any = { userId };
+
+    if (registerIdParam) {
+      where.registerId = registerIdParam;
+    }
 
     if (startDateParam && endDateParam) {
       where.date = {
@@ -56,8 +61,8 @@ export async function GET(req: Request) {
     });
 
 
-    const tableData = couriers.map(row => ({
-      "Sr.No": Number(row.srNo) || 0,
+    const tableData = couriers.map((row, index) => ({
+      "Sr.No": index + 1,
       "Date": new Date(row.date),
       "Challan No": row.challanNo,
       "From Party": row.fromParty,

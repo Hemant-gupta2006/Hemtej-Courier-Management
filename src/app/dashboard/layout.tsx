@@ -1,4 +1,5 @@
 import { DashboardShell } from "@/components/DashboardShell";
+import { RegisterProvider } from "@/context/RegisterContext";
 
 export default function DashboardLayout({
   children,
@@ -11,7 +12,10 @@ export default function DashboardLayout({
       <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-blue-500/10 rounded-full blur-[120px] mix-blend-multiply dark:mix-blend-screen pointer-events-none" />
       <div className="absolute bottom-0 right-1/4 w-[400px] h-[400px] bg-purple-500/10 rounded-full blur-[100px] mix-blend-multiply dark:mix-blend-screen pointer-events-none" />
 
-      <DashboardShell>{children}</DashboardShell>
+      <RegisterProvider>
+        <DashboardShell>{children}</DashboardShell>
+      </RegisterProvider>
     </div>
   );
 }
+

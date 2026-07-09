@@ -43,9 +43,38 @@ export async function POST(req: Request) {
       });
       if (existing) continue;
 
-      currentSrNo++;
-      
       const date = item.date && !isNaN(Date.parse(item.date)) ? new Date(item.date) : new Date();
+      
+      // Resolve register for item date
+      const entryMonth = date.getMonth() + 1;
+      const entryYear = date.getFullYear();
+      let register = await prisma.courierRegister.findFirst({
+        where: { userId, month: entryMonth, year: entryYear }
+      });
+      
+      if (!register) {
+        const monthNames = [
+          "January", "February", "March", "April", "May", "June",
+          "July", "August", "September", "October", "November", "December"
+        ];
+        const name = `${monthNames[entryMonth - 1]} ${entryYear}`;
+        register = await prisma.courierRegister.create({
+          data: {
+            userId,
+            month: entryMonth,
+            year: entryYear,
+            name,
+            status: "Active"
+          }
+        });
+      }
+      
+      if (register.status === "Locked" || register.status === "Archived") {
+        // Skip entry if target register is locked or archived
+        continue;
+      }
+
+      currentSrNo++;
       const amount = Number(item.amount) || 0;
 
       const created = await prisma.courierEntry.create({
@@ -67,6 +96,7 @@ export async function POST(req: Request) {
           destination: String(item.destination || "").trim(),
           amount,
           status: String(item.status || "Cash").trim(),
+          registerId: register.id,
         }
       });
       createdItems.push(created);

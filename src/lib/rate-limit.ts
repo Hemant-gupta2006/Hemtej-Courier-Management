@@ -1,7 +1,7 @@
 type RateLimitInfo = { count: number; lastReset: number };
 const rateLimits = new Map<string, RateLimitInfo>();
 
-export function checkRateLimit(userId: string, maxRequests: number = 10, windowMs: number = 10000): boolean {
+export function checkRateLimit(userId: string, maxRequests: number = 100, windowMs: number = 10000): boolean {
   const now = Date.now();
   let info = rateLimits.get(userId);
 
