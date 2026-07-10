@@ -226,6 +226,7 @@ export function DataTable<TData, TValue>({
   const [rowErrorVersions, setRowErrorVersions] = useState<Record<string, number>>({});
   const nextChallanRef = useRef<number | null>(null);
   const isSavingRef = useRef(false);
+  const lastActiveRegisterIdRef = useRef<string | null>(null);
 
   const isReadOnly = activeRegister?.status === "Locked" || activeRegister?.status === "Archived";
 
@@ -271,20 +272,25 @@ export function DataTable<TData, TValue>({
 
   useEffect(() => {
     if (activeRegister) {
-      const { month, year } = activeRegister;
-      const pad = (num: number) => String(num).padStart(2, '0');
-      const today = new Date();
-      let defaultDay = pad(today.getDate());
-      const lastDayInMonth = new Date(year, month, 0).getDate();
-      if (today.getMonth() + 1 !== month || today.getFullYear() !== year) {
-        defaultDay = "01";
-      } else if (today.getDate() > lastDayInMonth) {
-        defaultDay = pad(lastDayInMonth);
+      if (activeRegister.id !== lastActiveRegisterIdRef.current) {
+        lastActiveRegisterIdRef.current = activeRegister.id;
+        const { month, year } = activeRegister;
+        const pad = (num: number) => String(num).padStart(2, '0');
+        const today = new Date();
+        let defaultDay = pad(today.getDate());
+        const lastDayInMonth = new Date(year, month, 0).getDate();
+        if (today.getMonth() + 1 !== month || today.getFullYear() !== year) {
+          defaultDay = "01";
+        } else if (today.getDate() > lastDayInMonth) {
+          defaultDay = pad(lastDayInMonth);
+        }
+        setBatchDefaults((prev) => ({
+          ...prev,
+          date: `${year}-${pad(month)}-${defaultDay}`,
+        }));
       }
-      setBatchDefaults((prev) => ({
-        ...prev,
-        date: `${year}-${pad(month)}-${defaultDay}`,
-      }));
+    } else {
+      lastActiveRegisterIdRef.current = null;
     }
   }, [activeRegister]);
 
@@ -340,17 +346,15 @@ export function DataTable<TData, TValue>({
   }, []);
 
   const getNextChallan = useCallback((d: LocalRow[]): number => {
-    let maxLocalChallan = 0;
     if (d && d.length > 0) {
-      d.forEach((r) => {
+      for (const r of d) {
         const num = Number(r.challanNo);
-        if (!isNaN(num) && num > maxLocalChallan) {
-          maxLocalChallan = num;
+        if (!isNaN(num) && num > 0) {
+          return num + 1;
         }
-      });
+      }
     }
-    const dbNext = nextChallanRef.current || 1001;
-    return maxLocalChallan > 0 ? Math.max(maxLocalChallan + 1, dbNext) : dbNext;
+    return nextChallanRef.current || 1001;
   }, []);
 
   const addEmptyRow = useCallback(async (): Promise<string | null> => {
@@ -382,7 +386,7 @@ export function DataTable<TData, TValue>({
     const newRow: LocalRow = {
       id: tempId,
       tempId,
-      date: useBatchDefaults && batchDefaults.date ? batchDefaults.date : rowDate,
+      date: batchDefaults.date || rowDate,
       challanNo: nextChallan,
       fromParty: useBatchDefaults ? batchDefaults.fromParty : "",
       toParty: "",
@@ -608,7 +612,7 @@ export function DataTable<TData, TValue>({
           const freshRow: LocalRow = {
             id: nextTempId,
             tempId: nextTempId,
-            date: useBatchDefaults && batchDefaults.date ? batchDefaults.date : rowDate,
+            date: batchDefaults.date || rowDate,
             challanNo: predictedChallan,
             fromParty: useBatchDefaults ? batchDefaults.fromParty : "",
             toParty: "",
@@ -938,6 +942,13 @@ export function DataTable<TData, TValue>({
     return data.filter((r) => r.isNew).length;
   }, [data]);
 
+  const effectiveTotalCount = useMemo(() => {
+    const initialSavedCount = (initialData || []).length;
+    const currentSavedCount = data.filter((r) => !r.isNew).length;
+    const difference = currentSavedCount - initialSavedCount;
+    return Math.max(0, totalCount + difference);
+  }, [initialData, data, totalCount]);
+
   const tableMeta = useMemo(
     () => ({
       updateData,
@@ -949,7 +960,7 @@ export function DataTable<TData, TValue>({
       errorsRef,
       clearFieldError,
       mode,
-      totalCount,
+      totalCount: effectiveTotalCount,
       pageIndex,
       pageSize,
       localRowOffset,
@@ -977,7 +988,7 @@ export function DataTable<TData, TValue>({
       handleCellKeyDown,
       clearFieldError,
       mode,
-      totalCount,
+      effectiveTotalCount,
       pageIndex,
       pageSize,
       localRowOffset,
