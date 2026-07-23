@@ -18,23 +18,65 @@ export const authOptions: NextAuthOptions = {
           throw new Error("Invalid credentials");
         }
         const user = await prisma.user.findUnique({
-          where: { email: credentials.email }
+          where: { email: credentials.email.toLowerCase().trim() }
         });
         if (!user || !user.password) {
           throw new Error("Invalid credentials");
         }
+
+        if (user.disabled) {
+          throw new Error("ACCOUNT_DISABLED");
+        }
+
+        if (user.lockedUntil && user.lockedUntil > new Date()) {
+          const remainingMins = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60000);
+          throw new Error(`ACCOUNT_LOCKED:${remainingMins}`);
+        }
+
         const isCorrectPassword = await bcrypt.compare(
           credentials.password,
           user.password
         );
+
         if (!isCorrectPassword) {
+          const newFailed = (user.failedLoginAttempts || 0) + 1;
+          let lockDate: Date | null = null;
+          if (newFailed >= 5) {
+            lockDate = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes lockout
+          }
+          await prisma.user.update({
+            where: { id: user.id },
+            data: {
+              failedLoginAttempts: newFailed,
+              lockedUntil: lockDate,
+            }
+          });
+
+          if (newFailed >= 5) {
+            throw new Error("ACCOUNT_LOCKED:15");
+          }
           throw new Error("Invalid credentials");
         }
+
+        // On successful authentication, reset lockout counters & update login stats
+        const updatedUser = await prisma.user.update({
+          where: { id: user.id },
+          data: {
+            failedLoginAttempts: 0,
+            lockedUntil: null,
+            lastLogin: new Date(),
+            lastActivity: new Date(),
+            loginCount: { increment: 1 }
+          }
+        });
+
         return {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
+          id: updatedUser.id,
+          name: updatedUser.name,
+          email: updatedUser.email,
+          role: updatedUser.role,
+          disabled: updatedUser.disabled,
+          mustChangePassword: updatedUser.mustChangePassword,
         };
       }
     })
@@ -46,10 +88,12 @@ export const authOptions: NextAuthOptions = {
     strategy: "jwt",
   },
   callbacks: {
-    async jwt({ token, user, account }) {
+    async jwt({ token, user }) {
       if (user) {
         token.role = (user as any).role || "Staff";
         token.id = user.id;
+        token.disabled = (user as any).disabled || false;
+        token.mustChangePassword = (user as any).mustChangePassword || false;
       }
       return token;
     },
@@ -57,6 +101,8 @@ export const authOptions: NextAuthOptions = {
       if (session.user) {
         (session.user as any).role = token.role;
         (session.user as any).id = token.id;
+        (session.user as any).disabled = token.disabled;
+        (session.user as any).mustChangePassword = token.mustChangePassword;
       }
       return session;
     }

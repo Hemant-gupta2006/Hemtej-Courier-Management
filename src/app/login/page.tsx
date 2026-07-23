@@ -28,12 +28,34 @@ export default function LoginPage() {
     });
 
     if (result?.error) {
-      toast.error("Invalid credentials.");
+      if (result.error === "ACCOUNT_DISABLED") {
+        toast.error("Your account has been disabled by an administrator.");
+      } else if (result.error.startsWith("ACCOUNT_LOCKED")) {
+        const mins = result.error.split(":")[1] || "15";
+        toast.error(`Account temporarily locked due to failed login attempts. Try again in ${mins} minutes.`);
+      } else {
+        toast.error("Invalid email or password.");
+      }
       setLoading(false);
     } else {
-      toast.success("Logged in successfully!");
-      router.push("/dashboard");
-      router.refresh();
+      // Fetch session data to determine role
+      try {
+        const res = await fetch("/api/auth/session");
+        const sessionData = await res.json();
+        const userRole = sessionData?.user?.role;
+
+        toast.success("Logged in successfully!");
+
+        if (userRole === "Admin") {
+          router.push("/admin");
+        } else {
+          router.push("/dashboard");
+        }
+        router.refresh();
+      } catch (e) {
+        router.push("/dashboard");
+        router.refresh();
+      }
     }
   };
 

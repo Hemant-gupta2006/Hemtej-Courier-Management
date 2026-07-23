@@ -137,7 +137,7 @@ export function AdminNavbar({ onToggleSidebar, isSidebarOpen }: AdminNavbarProps
       <div className="flex items-center gap-3">
         {/* Notifications Popover */}
         <DropdownMenu>
-          <DropdownMenuTrigger className="h-9 w-9 rounded-xl relative flex items-center justify-center text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors outline-none cursor-pointer">
+          <DropdownMenuTrigger id="admin-bell-trigger" className="h-9 w-9 rounded-xl relative flex items-center justify-center text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors outline-none cursor-pointer">
             <Bell className="h-5 w-5" />
             {unreadCount > 0 && (
               <span className="absolute -top-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[10px] font-bold text-white ring-2 ring-white dark:ring-[#0f172a] animate-pulse">
@@ -165,28 +165,45 @@ export function AdminNavbar({ onToggleSidebar, isSidebarOpen }: AdminNavbarProps
                 No new alerts
               </div>
             ) : (
-              logs.map((log) => (
-                <DropdownMenuItem
-                  key={log.id}
-                  onClick={() => router.push("/admin/audit-logs")}
-                  className="flex items-start gap-3 p-3 rounded-xl cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
-                >
-                  <div className="mt-0.5 flex-shrink-0">
-                    {getLogIcon(log.action)}
-                  </div>
-                  <div className="flex-1 min-w-0 space-y-0.5">
-                    <p className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
-                      {log.adminName} performed {log.action.replace("_", " ")}
-                    </p>
-                    <p className="text-[10px] text-slate-400 truncate">
-                      Entity: {log.entity} ({log.entityId.slice(0, 8)}...)
-                    </p>
-                    <p className="text-[9px] text-slate-500 font-medium">
-                      {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </p>
-                  </div>
-                </DropdownMenuItem>
-              ))
+              logs.map((log) => {
+                const adminName = log?.adminName || "Admin";
+                const actionText = (log?.action || "ACTION").replace(/_/g, " ");
+                const entityName = log?.entity || "System";
+                const entityIdShort = log?.entityId ? `${log.entityId.slice(0, 8)}...` : "";
+                let formattedTime = "";
+                if (log?.timestamp) {
+                  try {
+                    formattedTime = new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                  } catch {
+                    formattedTime = "";
+                  }
+                }
+
+                return (
+                  <DropdownMenuItem
+                    key={log?.id || Math.random().toString()}
+                    onClick={() => router.push("/admin/audit-logs")}
+                    className="flex items-start gap-3 p-3 rounded-xl cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+                  >
+                    <div className="mt-0.5 flex-shrink-0">
+                      {getLogIcon(log?.action || "")}
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-0.5">
+                      <p className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
+                        {adminName} performed {actionText}
+                      </p>
+                      <p className="text-[10px] text-slate-400 truncate">
+                        Entity: {entityName} {entityIdShort ? `(${entityIdShort})` : ""}
+                      </p>
+                      {formattedTime && (
+                        <p className="text-[9px] text-slate-500 font-medium">
+                          {formattedTime}
+                        </p>
+                      )}
+                    </div>
+                  </DropdownMenuItem>
+                );
+              })
             )}
             <DropdownMenuSeparator className="bg-slate-100 dark:bg-slate-800" />
             <DropdownMenuItem

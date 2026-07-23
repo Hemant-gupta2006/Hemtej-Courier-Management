@@ -32,6 +32,12 @@ const adminRoutes = [
     color: "from-purple-500 to-pink-500",
   },
   {
+    label: "User Management",
+    icon: Users,
+    href: "/admin/users",
+    color: "from-blue-600 to-indigo-600",
+  },
+  {
     label: "Customers",
     icon: Users,
     href: "/admin/customers",

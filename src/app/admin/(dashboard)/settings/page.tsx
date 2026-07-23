@@ -39,7 +39,9 @@ export default function AdminSettingsPage() {
     companyPhone: "",
     companyEmail: "",
     companyGst: "",
-    defaultStatus: "Cash"
+    defaultStatus: "Cash",
+    invoiceTerms: "",
+    manifestTerms: ""
   });
 
   const fetchSettings = async () => {
@@ -296,6 +298,38 @@ export default function AdminSettingsPage() {
                     <option value="Account">Account</option>
                     <option value="Pending">Pending</option>
                   </select>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-4">
+                <h4 className="text-sm font-bold text-slate-900 dark:text-white">Document Terms & Legal Notes</h4>
+                
+                <div className="space-y-1.5">
+                  <Label htmlFor="set-inv-terms" className="text-xs font-semibold text-slate-600 dark:text-slate-400">
+                    Billing Invoice Terms & Conditions
+                  </Label>
+                  <textarea
+                    id="set-inv-terms"
+                    rows={2}
+                    placeholder="Standard invoice payment terms..."
+                    value={settings.invoiceTerms || ""}
+                    onChange={(e) => setSettings((s) => ({ ...s, invoiceTerms: e.target.value }))}
+                    className="flex w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950/40 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500/50"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="set-man-terms" className="text-xs font-semibold text-slate-600 dark:text-slate-400">
+                    Manifest Form Terms & Legal Disclaimer
+                  </Label>
+                  <textarea
+                    id="set-man-terms"
+                    rows={2}
+                    placeholder="Manifest dispatch notes..."
+                    value={settings.manifestTerms || ""}
+                    onChange={(e) => setSettings((s) => ({ ...s, manifestTerms: e.target.value }))}
+                    className="flex w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950/40 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500/50"
+                  />
                 </div>
               </div>
             </CardContent>

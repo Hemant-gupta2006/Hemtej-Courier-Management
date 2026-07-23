@@ -59,7 +59,9 @@ export async function PUT(req: Request) {
       companyPhone,
       companyEmail,
       companyGst,
-      defaultStatus
+      defaultStatus,
+      invoiceTerms,
+      manifestTerms
     } = body;
 
     const existingSettings = await prisma.systemSettings.findUnique({
@@ -74,6 +76,8 @@ export async function PUT(req: Request) {
     if (companyEmail !== undefined) updateData.companyEmail = String(companyEmail);
     if (companyGst !== undefined) updateData.companyGst = String(companyGst);
     if (defaultStatus !== undefined) updateData.defaultStatus = String(defaultStatus);
+    if (invoiceTerms !== undefined) updateData.invoiceTerms = String(invoiceTerms);
+    if (manifestTerms !== undefined) updateData.manifestTerms = String(manifestTerms);
 
     const updatedSettings = await prisma.systemSettings.upsert({
       where: { id: "global" },
@@ -85,7 +89,9 @@ export async function PUT(req: Request) {
         companyPhone: companyPhone || "+91 9892796228",
         companyEmail: companyEmail || "info@seetaram.com",
         companyGst: companyGst || "27AYDPG0955B1ZV",
-        defaultStatus: defaultStatus || "Account"
+        defaultStatus: defaultStatus || "Account",
+        invoiceTerms: invoiceTerms || "Payment due within 15 days from invoice date. Goods once dispatched will not be returned.",
+        manifestTerms: manifestTerms || "Subject to local jurisdiction. Handle package with care."
       },
       update: updateData
     });
