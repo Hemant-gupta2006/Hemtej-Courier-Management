@@ -185,14 +185,14 @@ function NavbarInner({ onToggleSidebar, isSidebarOpen }: NavbarProps) {
             <div className="flex items-center gap-1.5 text-xs md:text-sm font-semibold text-slate-500 dark:text-slate-400 min-w-0">
               <button
                 onClick={() => router.push("/dashboard/entries")}
-                className="hover:text-purple-600 dark:hover:text-purple-400 transition-colors shrink-0"
+                className="hidden sm:inline hover:text-purple-600 dark:hover:text-purple-400 transition-colors shrink-0"
               >
                 Registers
               </button>
-              <ChevronRight className="h-3.5 w-3.5 text-slate-400 dark:text-slate-600 shrink-0" />
+              <ChevronRight className="hidden sm:inline h-3.5 w-3.5 text-slate-400 dark:text-slate-600 shrink-0" />
               <div className="flex items-center gap-1.5 text-slate-900 dark:text-slate-100 font-bold min-w-0">
                 <FolderClosed className="h-4 w-4 text-purple-650 dark:text-purple-400 shrink-0" />
-                <span className="truncate">{activeRegister.name}</span>
+                <span className="truncate max-w-[80px] sm:max-w-none">{activeRegister.name}</span>
               </div>
               <select
                 value={activeRegister.status}
@@ -202,7 +202,7 @@ function NavbarInner({ onToggleSidebar, isSidebarOpen }: NavbarProps) {
                     ? "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20"
                     : activeRegister.status === "Locked"
                     ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
-                    : "bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20"
+                    : "bg-slate-500/10 text-slate-650 dark:text-slate-400 border-slate-500/20"
                 }`}
               >
                 <option value="Active" className="bg-white dark:bg-slate-950 text-slate-900 dark:text-white">Active</option>
@@ -248,8 +248,12 @@ function NavbarInner({ onToggleSidebar, isSidebarOpen }: NavbarProps) {
                 >
                   <ChevronLeft className="h-3 w-3" />
                 </Button>
-                <span className="px-1 select-none">
-                  Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong>
+                <span className="px-1 select-none whitespace-nowrap">
+                  <span className="hidden sm:inline">Page </span>
+                  <strong>{currentPage}</strong>
+                  <span className="hidden sm:inline mx-1">of</span>
+                  <span className="inline sm:hidden mx-0.5">/</span>
+                  <strong>{totalPages}</strong>
                 </span>
                 <Button
                   variant="ghost"
@@ -270,7 +274,7 @@ function NavbarInner({ onToggleSidebar, isSidebarOpen }: NavbarProps) {
               variant="ghost"
               size="icon"
               onClick={handleDeleteRegister}
-              className="h-8 w-8 text-slate-400 hover:text-red-500 hover:bg-red-500/10 shrink-0"
+              className="hidden sm:flex h-8 w-8 text-slate-400 hover:text-red-500 hover:bg-red-500/10 shrink-0"
               title="Delete Register"
             >
               <Trash2 className="h-4 w-4" />
