@@ -13,7 +13,7 @@ import { toast } from "sonner";
 import {
   List, Trash2, Calendar, Loader2, FolderOpen, Plus, ArrowLeft, ArrowRight,
   AlertCircle, RefreshCw, X, HelpCircle, CheckCircle, Lock, Archive,
-  TrendingUp, Coins, FileText, Settings2
+  TrendingUp, Coins, FileText, Settings2, Pencil
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { getAutocompleteData } from "@/lib/autocomplete";
@@ -96,6 +96,92 @@ function DefaultDateModal({
             className="h-12 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold"
           >
             Apply Default
+          </Button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+// ── Professional Delete Entry Warning Modal ────────────────────────────────
+function DeleteConfirmModal({
+  open,
+  entry,
+  onClose,
+  onConfirm,
+  isDeleting,
+}: {
+  open: boolean;
+  entry: any | null;
+  onClose: () => void;
+  onConfirm: () => void;
+  isDeleting: boolean;
+}) {
+  if (!open || !entry) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+      <motion.div
+        initial={{ scale: 0.95, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.95, opacity: 0 }}
+        className="relative z-10 w-full max-w-sm rounded-[28px] bg-slate-900 border border-white/10 shadow-2xl p-6 space-y-5 text-white"
+      >
+        {/* Header Icon + Title */}
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-2xl bg-red-500/15 border border-red-500/20 flex items-center justify-center shrink-0">
+            <Trash2 className="h-5.5 w-5.5 text-red-400" />
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-white">Delete Entry?</h2>
+            <p className="text-xs text-slate-400">This action cannot be undone.</p>
+          </div>
+        </div>
+
+        {/* Entry Card Preview */}
+        <div className="rounded-xl bg-slate-800/80 border border-slate-700/60 p-3.5 space-y-2 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-slate-400">Entry:</span>
+            <span className="font-bold text-white">#{entry.srNo} (CH-{entry.challanNo})</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-slate-400">From / To:</span>
+            <span className="font-medium text-slate-200 truncate max-w-[180px]">
+              {entry.fromParty} → {entry.toParty}
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-slate-400">Amount:</span>
+            <span className="font-bold text-emerald-400">
+              {entry.amount ? `₹${Number(entry.amount).toLocaleString("en-IN")}` : "-"}
+            </span>
+          </div>
+        </div>
+
+        {/* Action Buttons */}
+        <div className="grid grid-cols-2 gap-3 pt-1">
+          <Button
+            variant="outline"
+            onClick={onClose}
+            disabled={isDeleting}
+            className="h-11 rounded-xl border-slate-700 bg-transparent text-slate-300 hover:bg-slate-800"
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={onConfirm}
+            disabled={isDeleting}
+            className="h-11 rounded-xl bg-red-600 hover:bg-red-700 text-white font-semibold gap-2 shadow-lg shadow-red-600/20"
+          >
+            {isDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+            {isDeleting ? "Deleting..." : "Delete"}
           </Button>
         </div>
       </motion.div>
@@ -276,6 +362,38 @@ function CourierEntryPageInner() {
   const [createRegisterOpen, setCreateRegisterOpen] = useState(false);
   const [hasOrphans, setHasOrphans] = useState(false);
   const [isMigrating, setIsMigrating] = useState(false);
+
+  // Edit & Delete entry states
+  const [editingEntry, setEditingEntry] = useState<any | null>(null);
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [deletingEntry, setDeletingEntry] = useState<any | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const confirmDeleteEntry = async () => {
+    if (!deletingEntry) return;
+    setIsDeleting(true);
+    try {
+      const res = await fetch(`/api/couriers/${deletingEntry.id}`, {
+        method: "DELETE",
+      });
+      const resJson = await res.json().catch(() => null);
+
+      if (res.ok && resJson?.success !== false) {
+        toast.success(`Entry deleted successfully`);
+        setEntries((prev) => prev.filter((e) => e.id !== deletingEntry.id));
+        setDeletingEntry(null);
+        refreshRegisters();
+      } else {
+        const errMessage = resJson?.error || "Failed to delete entry";
+        toast.error(errMessage);
+      }
+    } catch (err) {
+      console.error("Delete entry error:", err);
+      toast.error("Network error while deleting entry");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   // Sync registerId from searchParams to context
   useEffect(() => {
@@ -576,6 +694,14 @@ function CourierEntryPageInner() {
         }}
       />
 
+      <DeleteConfirmModal
+        open={Boolean(deletingEntry)}
+        entry={deletingEntry}
+        onClose={() => setDeletingEntry(null)}
+        onConfirm={confirmDeleteEntry}
+        isDeleting={isDeleting}
+      />
+
       <div className="h-full flex flex-col overflow-hidden space-y-2">
         {/* Mobile only compact header */}
         {isMobile && (
@@ -627,7 +753,18 @@ function CourierEntryPageInner() {
               </div>
             ) : (
               visibleData.map((entry: any) => (
-                <MobileEntryCard key={entry.id} entry={entry} />
+                <MobileEntryCard
+                  key={entry.id}
+                  entry={entry}
+                  isReadOnly={isReadOnly}
+                  onEdit={(item) => {
+                    setEditingEntry(item);
+                    setIsFormOpen(true);
+                  }}
+                  onDelete={(item) => {
+                    setDeletingEntry(item);
+                  }}
+                />
               ))
             )}
           </div>
@@ -640,15 +777,26 @@ function CourierEntryPageInner() {
             autocompleteData={autocompleteData}
             activeRegisterId={activeRegister.id}
             isReadOnly={isReadOnly}
-            onSaved={(newEntry) => {
+            editingEntry={editingEntry}
+            isOpen={isFormOpen}
+            onOpenChange={(val) => {
+              setIsFormOpen(val);
+              if (!val) setEditingEntry(null);
+            }}
+            onSaved={(savedEntry, isEdit) => {
               // Trigger reload of active register counts as well
               refreshRegisters();
               startTransition(() => {
                 setEntries((prev) => {
-                  if (prev.some((e) => e.id === newEntry.id)) return prev;
-                  return [newEntry, ...prev].slice(0, 100);
+                  if (isEdit) {
+                    return prev.map((e) => (e.id === savedEntry.id ? { ...e, ...savedEntry } : e));
+                  } else {
+                    if (prev.some((e) => e.id === savedEntry.id)) return prev;
+                    return [savedEntry, ...prev].slice(0, 100);
+                  }
                 });
               });
+              setEditingEntry(null);
             }}
             mobileDefaultDate={mobileDefaultDate}
           />
@@ -674,10 +822,20 @@ export default function CourierEntryPage() {
 }
 
 // ── Mobile entry card (read-only view of saved entries) ──
-const MobileEntryCard = memo(function MobileEntryCard({ entry }: { entry: any }) {
+const MobileEntryCard = memo(function MobileEntryCard({
+  entry,
+  onEdit,
+  onDelete,
+  isReadOnly = false,
+}: {
+  entry: any;
+  onEdit?: (entry: any) => void;
+  onDelete?: (entry: any) => void;
+  isReadOnly?: boolean;
+}) {
   const statusColor: Record<string, string> = {
-    Account: "bg-blue-105 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
-    Cash: "bg-green-105 text-green-700 dark:bg-green-900/40 dark:text-green-300",
+    Account: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
+    Cash: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
   };
 
   return (
@@ -694,29 +852,65 @@ const MobileEntryCard = memo(function MobileEntryCard({ entry }: { entry: any })
           <span className="text-xs text-slate-400 font-medium">#{entry.srNo}</span>
           <span className="font-bold text-slate-900 dark:text-white text-sm">CH-{entry.challanNo}</span>
         </div>
-        <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${statusColor[entry.status] ?? "bg-slate-100 text-slate-650"}`}>
-          {entry.status}
-        </span>
+
+        <div className="flex items-center gap-2">
+          <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${statusColor[entry.status] ?? "bg-slate-100 text-slate-650"}`}>
+            {entry.status}
+          </span>
+          {!isReadOnly && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete?.(entry);
+              }}
+              className="p-1.5 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-500/10 dark:hover:text-red-400 dark:hover:bg-red-500/20 transition-all active:scale-90"
+              title="Delete Entry"
+              aria-label="Delete entry"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Party info */}
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs text-slate-700 dark:text-slate-300">
-        <div>
-          <p className="text-[10px] text-slate-400">From</p>
-          <p className="font-semibold text-slate-800 dark:text-slate-100 truncate">{entry.fromParty}</p>
+      {/* Main Content + Edit button aligned on right side */}
+      <div className="flex items-center justify-between gap-3">
+        {/* Party info grid */}
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs text-slate-700 dark:text-slate-300 flex-1">
+          <div>
+            <p className="text-[10px] text-slate-400">From</p>
+            <p className="font-semibold text-slate-800 dark:text-slate-100 truncate">{entry.fromParty}</p>
+          </div>
+          <div>
+            <p className="text-[10px] text-slate-400">To</p>
+            <p className="font-semibold text-slate-800 dark:text-slate-100 truncate">{entry.toParty}</p>
+          </div>
+          <div>
+            <p className="text-[10px] text-slate-400">Destination</p>
+            <p className="font-semibold text-slate-800 dark:text-slate-100">{entry.destination}</p>
+          </div>
+          <div>
+            <p className="text-[10px] text-slate-400">Weight</p>
+            <p className="font-semibold text-slate-800 dark:text-slate-100">{formatWeight(entry.weightValue, entry.weightUnit)}</p>
+          </div>
         </div>
-        <div>
-          <p className="text-[10px] text-slate-400">To</p>
-          <p className="font-semibold text-slate-800 dark:text-slate-100 truncate">{entry.toParty}</p>
-        </div>
-        <div>
-          <p className="text-[10px] text-slate-400">Destination</p>
-          <p className="font-semibold text-slate-800 dark:text-slate-100">{entry.destination}</p>
-        </div>
-        <div>
-          <p className="text-[10px] text-slate-400">Weight</p>
-          <p className="font-semibold text-slate-800 dark:text-slate-100">{formatWeight(entry.weightValue, entry.weightUnit)}</p>
-        </div>
+
+        {/* Edit Button positioned on right side where arrow points */}
+        {!isReadOnly && (
+          <div className="shrink-0 self-center">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onEdit?.(entry);
+              }}
+              className="p-2.5 rounded-xl bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 dark:bg-blue-400/10 dark:hover:bg-blue-400/20 border border-blue-500/20 transition-all active:scale-90 flex items-center justify-center"
+              title="Edit Entry"
+              aria-label="Edit entry"
+            >
+              <Pencil className="w-4 h-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Footer */}

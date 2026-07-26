@@ -191,15 +191,26 @@ export function MobileEntryForm({
   mobileDefaultDate,
   activeRegisterId,
   isReadOnly = false,
+  editingEntry = null,
+  isOpen,
+  onOpenChange,
 }: {
   existingChallans: string[];
   autocompleteData: { fromParties: string[]; toParties: string[]; destinations: string[] };
-  onSaved: (newEntry: any) => void;
+  onSaved: (savedEntry: any, isEdit: boolean) => void;
   mobileDefaultDate?: string | null;
   activeRegisterId?: string;
   isReadOnly?: boolean;
+  editingEntry?: any | null;
+  isOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = isOpen !== undefined ? isOpen : internalOpen;
+  const setOpen = (val: boolean) => {
+    setInternalOpen(val);
+    onOpenChange?.(val);
+  };
   const [loading, setSaving] = useState(false);
 
   // Predict the next challan based on the most recent entry
@@ -229,12 +240,36 @@ export function MobileEntryForm({
   const [form, setForm] = useState<FormData>(defaultForm());
   const [errors, setErrors] = useState<Errors>({});
 
-  // Recompute form when it opens to grab the latest challan number
+  // Recompute form when it opens (new or edit entry)
   useEffect(() => {
     if (open) {
-      setForm(defaultForm());
+      if (editingEntry) {
+        let dateStr = mobileDefaultDate || new Date().toISOString().split("T")[0];
+        if (editingEntry.date) {
+          try {
+            dateStr = new Date(editingEntry.date).toISOString().split("T")[0];
+          } catch {
+            // fallback
+          }
+        }
+        setForm({
+          date: dateStr,
+          challanNo: String(editingEntry.challanNo ?? ""),
+          fromParty: editingEntry.fromParty ?? "",
+          toParty: editingEntry.toParty ?? "",
+          weightNum: String(editingEntry.weightValue ?? editingEntry.weight ?? ""),
+          weightUnit: editingEntry.weightUnit || "gm",
+          destination: editingEntry.destination ?? "",
+          amount: editingEntry.amount != null && editingEntry.amount !== undefined ? String(editingEntry.amount) : "",
+          status: editingEntry.status || "Account",
+          mode: editingEntry.mode || "Surface",
+        });
+      } else {
+        setForm(defaultForm());
+      }
+      setErrors({});
     }
-  }, [open]);
+  }, [open, editingEntry]);
 
   // Update background form if default date changes while closed
   useEffect(() => {
@@ -254,9 +289,15 @@ export function MobileEntryForm({
 
   const validate = (): Errors => {
     const e: Errors = {};
-    if (!form.challanNo.trim()) e.challanNo = "Challan Number is required.";
-    else if (existingChallans.includes(form.challanNo.trim()))
-      e.challanNo = "This challan number already exists.";
+    const challanVal = form.challanNo.trim();
+    if (!challanVal) {
+      e.challanNo = "Challan Number is required.";
+    } else {
+      const isSameChallan = editingEntry && String(editingEntry.challanNo) === challanVal;
+      if (!isSameChallan && existingChallans.includes(challanVal)) {
+        e.challanNo = "This challan number already exists.";
+      }
+    }
     if (!form.fromParty.trim()) e.fromParty = "From Party is required.";
     if (!form.toParty.trim()) e.toParty = "To Party is required.";
     if (!form.destination.trim()) e.destination = "Destination is required.";
@@ -303,35 +344,49 @@ export function MobileEntryForm({
 
     setSaving(true);
     try {
-      const res = await fetch("/api/couriers", {
-        method: "POST",
+      const isEdit = Boolean(editingEntry && editingEntry.id);
+      const url = isEdit ? `/api/couriers/${editingEntry.id}` : "/api/couriers";
+      const method = isEdit ? "PATCH" : "POST";
+
+      const payload: any = {
+        date: cleaned.date,
+        challanNo: cleaned.challanNo,
+        fromParty: cleaned.fromParty,
+        toParty: cleaned.toParty,
+        weightValue,
+        weightUnit,
+        destination: cleaned.destination,
+        amount: parseFloat(cleaned.amount) || 0,
+        status: cleaned.status,
+        mode: cleaned.mode,
+      };
+
+      if (!isEdit) {
+        payload.registerId = activeRegisterId;
+      }
+
+      const res = await fetch(url, {
+        method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          date: cleaned.date,
-          challanNo: cleaned.challanNo,
-          fromParty: cleaned.fromParty,
-          toParty: cleaned.toParty,
-          weightValue,
-          weightUnit,
-          destination: cleaned.destination,
-          amount: parseFloat(cleaned.amount) || 0,
-          status: cleaned.status,
-          mode: cleaned.mode,
-          registerId: activeRegisterId,
-        }),
+        body: JSON.stringify(payload),
       });
-      if (res.ok) {
-        const json = await res.json();
-        toast.success("Entry saved!");
+
+      const resJson = await res.json().catch(() => null);
+
+      if (res.ok && resJson) {
+        const savedData = resJson.data || resJson;
+        toast.success(isEdit ? "Entry updated successfully!" : "Entry saved!");
         clearAutocompleteCache();
         setForm(defaultForm());
         setErrors({});
         setOpen(false);
-        onSaved(json.data);
+        onSaved(savedData, isEdit);
       } else {
-        toast.error((await res.text()) || "Failed to save");
+        const errorMessage = resJson?.error || (typeof resJson === "string" ? resJson : "Failed to save");
+        toast.error(errorMessage);
       }
-    } catch {
+    } catch (err) {
+      console.error("Save entry error:", err);
       toast.error("Network error");
     } finally {
       setSaving(false);
@@ -381,7 +436,9 @@ export function MobileEntryForm({
 
               {/* Header */}
               <div className="flex items-center justify-between px-6 py-3 border-b border-slate-100 dark:border-slate-800">
-                <h2 className="text-lg font-bold text-slate-900 dark:text-white">New Courier Entry</h2>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                  {editingEntry ? "Edit Courier Entry" : "New Courier Entry"}
+                </h2>
                 <button
                   onClick={() => setOpen(false)}
                   className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
@@ -572,7 +629,13 @@ export function MobileEntryForm({
                   className="w-full h-14 text-base font-semibold rounded-2xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg shadow-blue-500/25 gap-2"
                 >
                   <Save className="h-5 w-5" />
-                  {loading ? "Saving..." : "Save Entry"}
+                  {loading
+                    ? editingEntry
+                      ? "Updating..."
+                      : "Saving..."
+                    : editingEntry
+                    ? "Update Entry"
+                    : "Save Entry"}
                 </Button>
               </div>
             </motion.div>
