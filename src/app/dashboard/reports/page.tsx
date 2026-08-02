@@ -269,7 +269,7 @@ export default function ReportsPage() {
             <div className="grid grid-cols-2 gap-3 flex-1">
               <div className="space-y-2">
                 <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Month</label>
-                <Select value={monthlyMonth} onValueChange={setMonthlyMonth}>
+                <Select value={monthlyMonth} onValueChange={(val) => val && setMonthlyMonth(val)}>
                   <SelectTrigger className="rounded-xl h-11 bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800">
                     <SelectValue placeholder="Month" />
                   </SelectTrigger>
@@ -284,7 +284,7 @@ export default function ReportsPage() {
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Year</label>
-                <Select value={monthlyYear} onValueChange={setMonthlyYear}>
+                <Select value={monthlyYear} onValueChange={(val) => val && setMonthlyYear(val)}>
                   <SelectTrigger className="rounded-xl h-11 bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800">
                     <SelectValue placeholder="Year" />
                   </SelectTrigger>
