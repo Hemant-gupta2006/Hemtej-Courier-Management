@@ -59,6 +59,7 @@ model User {
   sessions            Session[]
   courierEntries      CourierEntry[]
   courierRegisters    CourierRegister[]
+  billingAliasGroups  BillingAliasGroup[]
 }
 
 model VerificationToken {
@@ -133,4 +134,36 @@ model AuditLog {
   timestamp DateTime @default(now())
 }
 
+model BillingAliasGroup {
+  id               String   @id @default(cuid())
+  userId           String
+  billingPartyName String
+  
+  // Future-proofing fields
+  gstNumber        String?
+  address          String?
+  city             String?
+  state            String?
+  pincode          String?
+  contactPerson    String?
+  mobileNumber     String?
+  email            String?
 
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  aliases          BillingAlias[]
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, billingPartyName])
+}
+
+model BillingAlias {
+  id        String   @id @default(cuid())
+  groupId   String
+  aliasName String
+  
+  group     BillingAliasGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  
+  @@unique([groupId, aliasName])
+}

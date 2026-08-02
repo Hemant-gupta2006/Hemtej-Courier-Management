@@ -208,8 +208,8 @@ export async function POST(req: Request) {
       try {
         courier = await prisma.$transaction(async (tx) => {
           const lastEntry = await tx.courierEntry.findFirst({
-            where: { userId },
-            orderBy: { createdAt: "desc" },
+            where: { userId, registerId: finalRegisterId },
+            orderBy: { challanNo: "desc" },
             select: { challanNo: true }
           });
           let nextChallanNo;

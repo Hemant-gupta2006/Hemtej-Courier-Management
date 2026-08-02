@@ -1,13 +1,13 @@
 "use client";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Download, FileText, Calendar, User, Settings2, Loader2, AlertCircle } from "lucide-react";
+import { Download, Receipt, Calendar, User, Settings2, Loader2, AlertCircle, Database, Plus, X, Users, Package, ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import { getAutocompleteData } from "@/lib/autocomplete";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
@@ -15,7 +15,12 @@ export default function ReportsPage() {
   const [manifestDate, setManifestDate] = useState(new Date().toISOString().split('T')[0]);
   const [billingFromDate, setBillingFromDate] = useState("");
   const [billingToDate, setBillingToDate] = useState("");
-  const [billingParty, setBillingParty] = useState("");
+  
+  const [billingParties, setBillingParties] = useState<string[]>([]);
+  const [currentAlias, setCurrentAlias] = useState("");
+  
+  const [billingPartyName, setBillingPartyName] = useState("");
+  const [saveAliases, setSaveAliases] = useState(false);
   const [parties, setParties] = useState<string[]>([]);
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
   const [advancedDetails, setAdvancedDetails] = useState({
@@ -37,13 +42,13 @@ export default function ReportsPage() {
   const [isManifestLoading, setIsManifestLoading] = useState(false);
   const [isBillingLoading, setIsBillingLoading] = useState(false);
 
-  const filteredParties = useMemo(() => parties
-    .filter(p => p.toLowerCase().includes(billingParty.toLowerCase()))
-    .slice(0, 5), [parties, billingParty]);
+  const [monthlyMonth, setMonthlyMonth] = useState((new Date().getMonth() + 1).toString());
+  const [monthlyYear, setMonthlyYear] = useState(new Date().getFullYear().toString());
+  const [isMonthlyLoading, setIsMonthlyLoading] = useState(false);
 
   const isValidParty = useMemo(() => 
-    parties.some(p => p.toLowerCase() === billingParty.toLowerCase().trim()),
-  [parties, billingParty]);
+    billingParties.length > 0 && billingPartyName.trim() !== "",
+  [billingParties, billingPartyName]);
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -55,7 +60,7 @@ export default function ReportsPage() {
   }, [billingFromDate, billingToDate, today]);
 
   const isManifestValid = !!manifestDate && manifestDate <= today;
-  const isBillingValid = !!billingFromDate && !!billingToDate && !!billingParty && isValidParty && !dateError;
+  const isBillingValid = !!billingFromDate && !!billingToDate && isValidParty && !dateError;
 
   useEffect(() => {
     getAutocompleteData().then(data => {
@@ -69,7 +74,6 @@ export default function ReportsPage() {
     setIsManifestLoading(true);
     try {
       window.location.href = `/api/reports/manifest?date=${manifestDate}`;
-      // Give it some time to start the download before enabling button again
       setTimeout(() => setIsManifestLoading(false), 2000);
     } catch (error) {
       toast.error("Failed to generate manifest");
@@ -82,12 +86,25 @@ export default function ReportsPage() {
 
     setIsBillingLoading(true);
     try {
+      const uniqueParties = Array.from(new Set(billingParties));
+
+      if (saveAliases && uniqueParties.length > 0 && billingPartyName) {
+        await fetch("/api/reports/aliases", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            billingPartyName: billingPartyName.trim(),
+            aliases: uniqueParties
+          })
+        });
+      }
+
       const params = new URLSearchParams();
       if (billingFromDate) params.append("startDate", billingFromDate);
       if (billingToDate) params.append("endDate", billingToDate);
-      if (billingParty) params.append("fromParty", billingParty);
+      if (billingPartyName) params.append("billingPartyName", billingPartyName.trim());
+      uniqueParties.forEach(p => params.append("partyName", p.trim()));
 
-      // Add advanced details
       Object.entries(advancedDetails).forEach(([key, value]) => {
         if (value) params.append(key, value);
       });
@@ -100,35 +117,108 @@ export default function ReportsPage() {
     }
   };
 
+  useEffect(() => {
+    if (!billingPartyName.trim()) return;
+    
+    const delayDebounceFn = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/reports/aliases?billingPartyName=${encodeURIComponent(billingPartyName.trim())}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.data?.aliases && data.data.aliases.length > 0) {
+            setBillingParties(data.data.aliases);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to load aliases", error);
+      }
+    }, 500);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [billingPartyName]);
+
+  const addAlias = (alias: string) => {
+    if (alias.trim() && !billingParties.includes(alias.trim())) {
+      setBillingParties([...billingParties, alias.trim()]);
+    }
+    setCurrentAlias("");
+  };
+
+  const removeAlias = (index: number) => {
+    const newParties = [...billingParties];
+    newParties.splice(index, 1);
+    setBillingParties(newParties);
+  };
+
+  const downloadMonthly = async () => {
+    if (isMonthlyLoading) return;
+    setIsMonthlyLoading(true);
+    try {
+      window.location.href = `/api/reports/monthly?month=${monthlyMonth}&year=${monthlyYear}`;
+      setTimeout(() => setIsMonthlyLoading(false), 2000);
+    } catch (error) {
+      toast.error("Failed to generate monthly report");
+      setIsMonthlyLoading(false);
+    }
+  };
+
+  const currentAliasFiltered = parties
+    .filter(p => p.toLowerCase().includes(currentAlias.toLowerCase()))
+    .slice(0, 5);
+
+  const [activeTab, setActiveTab] = useState<"billing" | "manifest" | "monthly">("billing");
+
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-10 px-4 md:px-0">
       <div className="flex flex-col gap-1">
         <h2 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-          System Reports
+          Reports
         </h2>
         <p className="text-muted-foreground">
-          Generate and download operational and financial reports in Excel format.
+          Generate exports, manifests and billing documents
         </p>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2">
+      {/* Tabs Navigation */}
+      <div className="flex flex-wrap gap-2 p-1.5 bg-slate-100 dark:bg-slate-800/60 rounded-2xl w-fit">
+        <button 
+          onClick={() => setActiveTab("billing")}
+          className={cn("flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all", activeTab === "billing" ? "bg-white dark:bg-slate-900 shadow-md text-purple-600 dark:text-purple-400" : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-800/80")}
+        >
+          <Receipt className="h-4 w-4" /> Account Billing
+        </button>
+        <button 
+          onClick={() => setActiveTab("manifest")}
+          className={cn("flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all", activeTab === "manifest" ? "bg-white dark:bg-slate-900 shadow-md text-blue-600 dark:text-blue-400" : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-800/80")}
+        >
+          <Package className="h-4 w-4" /> Daily Manifest
+        </button>
+        <button 
+          onClick={() => setActiveTab("monthly")}
+          className={cn("flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-semibold transition-all", activeTab === "monthly" ? "bg-white dark:bg-slate-900 shadow-md text-emerald-600 dark:text-emerald-400" : "text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-200/50 dark:hover:bg-slate-800/80")}
+        >
+          <Database className="h-4 w-4" /> Monthly Register
+        </button>
+      </div>
+
+      <div className="grid gap-6">
         {/* Daily Manifest Card */}
-        <Card className="border-white/20 dark:border-white/10 bg-white/50 dark:bg-slate-900/50 backdrop-blur-xl shadow-xl rounded-[24px] overflow-hidden">
+        {activeTab === "manifest" && (
+        <Card className="border-white/20 dark:border-white/10 bg-white/50 dark:bg-slate-900/50 backdrop-blur-xl shadow-xl rounded-[24px] overflow-hidden flex flex-col">
           <CardHeader className="pb-4">
             <div className="flex items-center gap-3">
               <div className="p-2.5 rounded-2xl bg-blue-100 dark:bg-blue-900/30">
-                <FileText className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+                <Package className="h-6 w-6 text-blue-600 dark:text-blue-400" />
               </div>
               <div>
                 <CardTitle className="text-xl">Daily Manifest</CardTitle>
-                <CardDescription>Export shipments grouped by destination for a specific day.</CardDescription>
               </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-semibold flex items-center gap-2">
-                <Calendar className="h-4 w-4" /> Select Date
+          <CardContent className="space-y-4 flex-1 flex flex-col">
+            <div className="space-y-2 flex-1">
+              <label className="text-sm font-semibold flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                <Calendar className="h-4 w-4" /> Date
               </label>
               <Input
                 type="date"
@@ -137,339 +227,401 @@ export default function ReportsPage() {
                 onChange={(e) => setManifestDate(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && downloadManifest()}
                 className={cn(
-                  "rounded-xl h-11 transition-all",
+                  "rounded-xl h-11 transition-all bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800",
                   manifestDate > today && "border-destructive focus-visible:ring-destructive"
                 )}
               />
               {manifestDate > today && (
-                <p className="text-[10px] font-bold text-destructive uppercase tracking-wider flex items-center gap-1 mt-1 animate-in fade-in slide-in-from-top-1">
-                  <AlertCircle className="h-3 w-3" /> Cannot select future date
+                <p className="text-[10px] font-bold text-destructive uppercase tracking-wider flex items-center gap-1 mt-1">
+                  <AlertCircle className="h-3 w-3" /> Future date
                 </p>
               )}
             </div>
-            <Button 
-              onClick={downloadManifest} 
-              disabled={!isManifestValid || isManifestLoading}
-              className="w-full h-11 rounded-xl bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
-            >
-              {isManifestLoading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Generating Manifest...
-                </>
-              ) : (
-                <>
-                  <Download className="mr-2 h-4 w-4" /> Download Manifest (Excel)
-                </>
-              )}
-            </Button>
+            <div className="pt-2 mt-auto">
+              <Button 
+                onClick={downloadManifest} 
+                disabled={!isManifestValid || isManifestLoading}
+                variant="outline"
+                className="w-full h-11 rounded-xl text-blue-600 border-blue-200 dark:border-blue-900/50 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+              >
+                {isManifestLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                Download
+              </Button>
+            </div>
           </CardContent>
         </Card>
+        )}
 
-        {/* Account Billing Card */}
-        <Card className="border-white/20 dark:border-white/10 bg-white/50 dark:bg-slate-900/50 backdrop-blur-xl shadow-xl rounded-[24px] overflow-hidden">
+        {/* Monthly Register Export Card */}
+        {activeTab === "monthly" && (
+        <Card className="border-white/20 dark:border-white/10 bg-white/50 dark:bg-slate-900/50 backdrop-blur-xl shadow-xl rounded-[24px] overflow-hidden flex flex-col">
           <CardHeader className="pb-4">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-2xl bg-purple-100 dark:bg-purple-900/30">
-                <FileText className="h-6 w-6 text-purple-600 dark:text-purple-400" />
+              <div className="p-2.5 rounded-2xl bg-emerald-100 dark:bg-emerald-900/30">
+                <Database className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
               </div>
               <div>
-                <CardTitle className="text-xl">Account Billing</CardTitle>
-                <CardDescription>Generate invoices for credit clients based on date range.</CardDescription>
+                <CardTitle className="text-xl">Monthly Register Export</CardTitle>
               </div>
             </div>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
+          <CardContent className="space-y-4 flex-1 flex flex-col">
+            <div className="grid grid-cols-2 gap-3 flex-1">
               <div className="space-y-2">
-                <label className="text-sm font-semibold">From Date</label>
+                <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Month</label>
+                <Select value={monthlyMonth} onValueChange={setMonthlyMonth}>
+                  <SelectTrigger className="rounded-xl h-11 bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800">
+                    <SelectValue placeholder="Month" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                      <SelectItem key={m} value={m.toString()}>
+                        {new Date(0, m - 1).toLocaleString('default', { month: 'short' })}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Year</label>
+                <Select value={monthlyYear} onValueChange={setMonthlyYear}>
+                  <SelectTrigger className="rounded-xl h-11 bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800">
+                    <SelectValue placeholder="Year" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
+                      <SelectItem key={y} value={y.toString()}>
+                        {y}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            
+            <div className="pt-2 mt-auto">
+              <Button 
+                onClick={downloadMonthly} 
+                disabled={isMonthlyLoading}
+                variant="outline"
+                className="w-full h-11 rounded-xl text-emerald-600 border-emerald-200 dark:border-emerald-900/50 hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
+              >
+                {isMonthlyLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                Download
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+        )}
+
+        {/* Account Billing Card */}
+        {activeTab === "billing" && (
+        <Card className="md:col-span-2 border-white/20 dark:border-white/10 bg-white/50 dark:bg-slate-900/50 backdrop-blur-xl shadow-xl rounded-[24px] overflow-hidden">
+          <CardHeader className="pb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-2xl bg-purple-100 dark:bg-purple-900/30">
+                <Receipt className="h-6 w-6 text-purple-600 dark:text-purple-400" />
+              </div>
+              <div>
+                <CardTitle className="text-xl">Account Billing</CardTitle>
+                <CardDescription>Generate GST invoices</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">From Date</label>
                 <Input
                   type="date"
                   max={today}
                   value={billingFromDate}
                   onChange={(e) => setBillingFromDate(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && downloadBilling()}
                   className={cn(
-                    "rounded-xl h-11",
+                    "rounded-xl h-11 bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800",
                     (billingFromDate > today || (billingFromDate && billingToDate && billingFromDate > billingToDate)) && "border-destructive focus-visible:ring-destructive"
                   )}
                 />
               </div>
-              <div className="space-y-2">
-                <label className="text-sm font-semibold">To Date</label>
+              <div className="space-y-2 md:col-span-2">
+                <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">To Date</label>
                 <Input
                   type="date"
                   max={today}
                   value={billingToDate}
                   onChange={(e) => setBillingToDate(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && downloadBilling()}
                   className={cn(
-                    "rounded-xl h-11",
+                    "rounded-xl h-11 bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800",
                     (billingToDate > today || (billingFromDate && billingToDate && billingFromDate > billingToDate)) && "border-destructive focus-visible:ring-destructive"
                   )}
                 />
               </div>
             </div>
             {dateError && (
-              <p className="text-[10px] font-bold text-destructive uppercase tracking-wider flex items-center gap-1 animate-in fade-in slide-in-from-top-1">
+              <p className="text-[10px] font-bold text-destructive uppercase tracking-wider flex items-center gap-1">
                 <AlertCircle className="h-3 w-3" /> {dateError}
               </p>
             )}
 
-            <div className="space-y-2">
-              <label className="text-sm font-semibold flex items-center gap-2">
-                <User className="h-4 w-4" /> Party Name (Required)
-              </label>
-              <div className="relative">
-                {billingParty.length > 0 && filteredParties[0] && filteredParties[0].toLowerCase().startsWith(billingParty.toLowerCase()) && (
+            <div className="space-y-3">
+              <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Booking Party Names</label>
+              
+              {/* Chips container */}
+              {billingParties.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {billingParties.map((party, index) => (
+                    <div key={index} className="flex items-center gap-1 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 px-3 py-1.5 rounded-full text-sm font-medium shadow-sm">
+                      <span>{party}</span>
+                      <button 
+                        onClick={() => removeAlias(index)}
+                        className="ml-1 text-slate-400 hover:text-destructive transition-colors rounded-full p-0.5 hover:bg-slate-100 dark:hover:bg-slate-800"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add Alias Input */}
+              <div className="relative max-w-sm">
+                {currentAlias.length > 0 && currentAliasFiltered[0] && currentAliasFiltered[0].toLowerCase().startsWith(currentAlias.toLowerCase()) && (
                   <div className="absolute inset-0 flex items-center px-3 pointer-events-none text-slate-400 dark:text-slate-500 z-0 h-11 text-sm">
-                    <span className="opacity-0">{billingParty}</span>
-                    <span>{filteredParties[0].slice(billingParty.length)}</span>
+                    <span className="opacity-0">{currentAlias}</span>
+                    <span>{currentAliasFiltered[0].slice(currentAlias.length)}</span>
                   </div>
                 )}
                 <Input
-                  placeholder="e.g. Reliance"
-                  value={billingParty}
-                  onChange={(e) => setBillingParty(e.target.value)}
+                  placeholder="+ Add Alias (Press Enter)"
+                  value={currentAlias}
+                  onChange={(e) => setCurrentAlias(e.target.value)}
                   onKeyDown={(e) => {
-                    const suggestion = filteredParties[0];
-                    const isSuggestionVisible = suggestion && suggestion.toLowerCase().startsWith(billingParty.toLowerCase()) && suggestion.toLowerCase() !== billingParty.toLowerCase();
+                    const suggestion = currentAliasFiltered[0];
+                    const isSuggestionVisible = suggestion && suggestion.toLowerCase().startsWith(currentAlias.toLowerCase()) && suggestion.toLowerCase() !== currentAlias.toLowerCase();
 
                     if ((e.key === "Tab" || e.key === "Enter") && isSuggestionVisible) {
                       e.preventDefault();
-                      setBillingParty(suggestion);
+                      setCurrentAlias(suggestion);
                     } else if (e.key === "Enter") {
                       e.preventDefault();
-                      downloadBilling();
+                      addAlias(currentAlias);
                     }
                   }}
-                  className={cn(
-                    "rounded-xl h-11 relative z-10",
-                    billingParty && !isValidParty && "border-destructive focus-visible:ring-destructive"
-                  )}
+                  className="rounded-xl h-11 relative z-10 bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 focus-visible:ring-purple-500/30"
                   style={{ backgroundColor: 'transparent' }}
                 />
               </div>
-              {billingParty && !isValidParty && (
-                <p className="text-[10px] font-bold text-destructive uppercase tracking-wider flex items-center gap-1 mt-1 animate-in fade-in slide-in-from-top-1">
-                  <AlertCircle className="h-3 w-3" /> Invalid party name
-                </p>
+            </div>
+
+            <div className="pt-2 space-y-3">
+              <label className="text-sm font-semibold flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                Official Invoice Name
+              </label>
+              <div className="relative">
+                <Input
+                  placeholder="e.g. Reliance Industries Ltd"
+                  value={billingPartyName}
+                  onChange={(e) => setBillingPartyName(e.target.value)}
+                  className="rounded-xl h-12 text-base font-medium bg-white dark:bg-slate-950 border-slate-300 dark:border-slate-700 shadow-sm transition-colors focus-visible:ring-purple-500/30"
+                />
+              </div>
+
+              <div className="flex items-center space-x-3 pt-2">
+                <div className="flex items-center justify-center">
+                  <input 
+                    type="checkbox" 
+                    id="saveAliases"
+                    checked={saveAliases}
+                    onChange={(e) => setSaveAliases(e.target.checked)}
+                    className="rounded-md border-slate-300 text-purple-600 focus:ring-purple-600 h-4 w-4 transition-all cursor-pointer shadow-sm"
+                  />
+                </div>
+                <label htmlFor="saveAliases" className="text-sm text-slate-600 dark:text-slate-400 cursor-pointer select-none">
+                  Remember this alias mapping for future
+                </label>
+              </div>
+            </div>
+
+            {/* Collapsible Invoice Details */}
+            <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden bg-white/50 dark:bg-slate-950/50 mt-4">
+              <button 
+                onClick={() => setIsAdvancedOpen(!isAdvancedOpen)}
+                className="w-full flex items-center justify-between p-4 text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-900/50 transition-colors"
+              >
+                <div className="flex items-center gap-2">
+                  <Settings2 className="h-4 w-4 text-purple-500" />
+                  Additional Invoice Details (Optional)
+                </div>
+                {isAdvancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              </button>
+              
+              {isAdvancedOpen && (
+                <div className="p-6 border-t border-slate-200 dark:border-slate-800 space-y-6">
+                  {/* Invoice Info */}
+                  <div className="space-y-4">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Invoice Information</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Bill Number</Label>
+                        <Input 
+                          placeholder="e.g. 199" 
+                          value={advancedDetails.billNo}
+                          onChange={(e) => setAdvancedDetails({...advancedDetails, billNo: e.target.value})}
+                          className="rounded-xl"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Invoice Date</Label>
+                        <Input 
+                          type="date"
+                          value={advancedDetails.invoiceDate}
+                          onChange={(e) => setAdvancedDetails({...advancedDetails, invoiceDate: e.target.value})}
+                          className="rounded-xl"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Party Details */}
+                  <div className="space-y-4">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Bill To (Party Details)</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Address Line 1</Label>
+                        <Input 
+                          placeholder="Shop No / Building" 
+                          value={advancedDetails.partyAddress1}
+                          onChange={(e) => setAdvancedDetails({...advancedDetails, partyAddress1: e.target.value})}
+                          className="rounded-xl"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Address Line 2</Label>
+                        <Input 
+                          placeholder="Area / Road" 
+                          value={advancedDetails.partyAddress2}
+                          onChange={(e) => setAdvancedDetails({...advancedDetails, partyAddress2: e.target.value})}
+                          className="rounded-xl"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label>City</Label>
+                        <Input 
+                          placeholder="City" 
+                          value={advancedDetails.partyCity}
+                          onChange={(e) => setAdvancedDetails({...advancedDetails, partyCity: e.target.value})}
+                          className="rounded-xl"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>State</Label>
+                        <Input 
+                          placeholder="State" 
+                          value={advancedDetails.partyState}
+                          onChange={(e) => setAdvancedDetails({...advancedDetails, partyState: e.target.value})}
+                          className="rounded-xl"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Pincode</Label>
+                        <Input 
+                          placeholder="400001" 
+                          value={advancedDetails.partyPincode}
+                          onChange={(e) => setAdvancedDetails({...advancedDetails, partyPincode: e.target.value})}
+                          className="rounded-xl"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Contact Number</Label>
+                        <Input 
+                          placeholder="+91" 
+                          value={advancedDetails.partyContact}
+                          onChange={(e) => setAdvancedDetails({...advancedDetails, partyContact: e.target.value})}
+                          className="rounded-xl"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>GST Number</Label>
+                        <Input 
+                          placeholder="27XXXXX" 
+                          value={advancedDetails.partyGst}
+                          onChange={(e) => setAdvancedDetails({...advancedDetails, partyGst: e.target.value})}
+                          className="rounded-xl"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Business Info */}
+                  <div className="space-y-4">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Your Business Details</h4>
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label>Business Name</Label>
+                        <Input 
+                          value={advancedDetails.businessName}
+                          onChange={(e) => setAdvancedDetails({...advancedDetails, businessName: e.target.value})}
+                          className="rounded-xl"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Business Address</Label>
+                        <Input 
+                          value={advancedDetails.businessAddress}
+                          onChange={(e) => setAdvancedDetails({...advancedDetails, businessAddress: e.target.value})}
+                          className="rounded-xl"
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>Contact No</Label>
+                          <Input 
+                            value={advancedDetails.businessContact}
+                            onChange={(e) => setAdvancedDetails({...advancedDetails, businessContact: e.target.value})}
+                            className="rounded-xl"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>GST Number</Label>
+                          <Input 
+                            value={advancedDetails.businessGst}
+                            onChange={(e) => setAdvancedDetails({...advancedDetails, businessGst: e.target.value})}
+                            className="rounded-xl"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
 
-            <div className="flex flex-col gap-3">
-              <Dialog open={isAdvancedOpen} onOpenChange={setIsAdvancedOpen}>
-                <DialogTrigger 
-                  render={
-                    <Button variant="outline" className="w-full h-11 rounded-xl border-purple-200 dark:border-purple-900/50 hover:bg-purple-50 dark:hover:bg-purple-900/20 text-purple-600 dark:text-purple-400">
-                      <Settings2 className="mr-2 h-4 w-4" /> Add Invoice Details (Optional)
-                    </Button>
-                  }
-                />
-                <DialogContent className="sm:max-w-[600px] max-h-[90vh] p-0 overflow-hidden bg-white dark:bg-slate-950 rounded-[24px]">
-                  <DialogHeader className="p-6 pb-2">
-                    <DialogTitle className="text-2xl font-bold flex items-center gap-2">
-                      <div className="p-2 rounded-xl bg-purple-100 dark:bg-purple-900/30">
-                        <FileText className="h-5 w-5 text-purple-600 dark:text-purple-400" />
-                      </div>
-                      Advanced Invoice Details
-                    </DialogTitle>
-                  </DialogHeader>
-                  <div className="px-6 py-2 h-[60vh] overflow-y-auto custom-scrollbar">
-                    <div className="space-y-6 pb-6">
-                      {/* Invoice Info */}
-                      <div className="space-y-4">
-                        <h4 className="text-sm font-bold uppercase tracking-wider text-slate-400">Invoice Information</h4>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <Label>Bill Number</Label>
-                            <Input 
-                              placeholder="e.g. 199" 
-                              value={advancedDetails.billNo}
-                              onChange={(e) => setAdvancedDetails({...advancedDetails, billNo: e.target.value})}
-                              className="rounded-xl"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>Invoice Date</Label>
-                            <Input 
-                              type="date"
-                              value={advancedDetails.invoiceDate}
-                              onChange={(e) => setAdvancedDetails({...advancedDetails, invoiceDate: e.target.value})}
-                              className="rounded-xl"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Party Details */}
-                      <div className="space-y-4">
-                        <h4 className="text-sm font-bold uppercase tracking-wider text-slate-400">Bill To (Party Details)</h4>
-                        <div className="space-y-4">
-                          <div className="space-y-2">
-                            <Label>Party Name</Label>
-                            <Input 
-                              value={billingParty}
-                              readOnly
-                              className="rounded-xl bg-slate-50 dark:bg-white/5"
-                            />
-                          </div>
-                          <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                              <Label>Address Line 1</Label>
-                              <Input 
-                                placeholder="Shop No / Building" 
-                                value={advancedDetails.partyAddress1}
-                                onChange={(e) => setAdvancedDetails({...advancedDetails, partyAddress1: e.target.value})}
-                                className="rounded-xl"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Address Line 2</Label>
-                              <Input 
-                                placeholder="Area / Road" 
-                                value={advancedDetails.partyAddress2}
-                                onChange={(e) => setAdvancedDetails({...advancedDetails, partyAddress2: e.target.value})}
-                                className="rounded-xl"
-                              />
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-3 gap-4">
-                            <div className="space-y-2">
-                              <Label>City</Label>
-                              <Input 
-                                placeholder="City" 
-                                value={advancedDetails.partyCity}
-                                onChange={(e) => setAdvancedDetails({...advancedDetails, partyCity: e.target.value})}
-                                className="rounded-xl"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>State</Label>
-                              <Input 
-                                placeholder="State" 
-                                value={advancedDetails.partyState}
-                                onChange={(e) => setAdvancedDetails({...advancedDetails, partyState: e.target.value})}
-                                className="rounded-xl"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Pincode</Label>
-                              <Input 
-                                placeholder="400001" 
-                                value={advancedDetails.partyPincode}
-                                onChange={(e) => setAdvancedDetails({...advancedDetails, partyPincode: e.target.value})}
-                                className="rounded-xl"
-                              />
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                              <Label>Contact Number</Label>
-                              <Input 
-                                placeholder="+91" 
-                                value={advancedDetails.partyContact}
-                                onChange={(e) => setAdvancedDetails({...advancedDetails, partyContact: e.target.value})}
-                                className="rounded-xl"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>GST Number</Label>
-                              <Input 
-                                placeholder="27XXXXX" 
-                                value={advancedDetails.partyGst}
-                                onChange={(e) => setAdvancedDetails({...advancedDetails, partyGst: e.target.value})}
-                                className="rounded-xl"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Business Info */}
-                      <div className="space-y-4">
-                        <h4 className="text-sm font-bold uppercase tracking-wider text-slate-400">Your Business Details (Defaults)</h4>
-                        <div className="space-y-4">
-                          <div className="space-y-2">
-                            <Label>Business Name</Label>
-                            <Input 
-                              value={advancedDetails.businessName}
-                              onChange={(e) => setAdvancedDetails({...advancedDetails, businessName: e.target.value})}
-                              className="rounded-xl"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label>Business Address</Label>
-                            <Input 
-                              value={advancedDetails.businessAddress}
-                              onChange={(e) => setAdvancedDetails({...advancedDetails, businessAddress: e.target.value})}
-                              className="rounded-xl"
-                            />
-                          </div>
-                          <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                              <Label>Contact No</Label>
-                              <Input 
-                                value={advancedDetails.businessContact}
-                                onChange={(e) => setAdvancedDetails({...advancedDetails, businessContact: e.target.value})}
-                                className="rounded-xl"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>GST Number</Label>
-                              <Input 
-                                value={advancedDetails.businessGst}
-                                onChange={(e) => setAdvancedDetails({...advancedDetails, businessGst: e.target.value})}
-                                className="rounded-xl"
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                    </div>
-                  </div>
-                  <DialogFooter className="p-6 pt-2 border-t dark:border-white/10">
-                    <Button 
-                      onClick={() => setIsAdvancedOpen(false)}
-                      className="w-full rounded-xl bg-purple-600 hover:bg-purple-700 text-white"
-                    >
-                      Save Details & Close
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-
-              <Button 
-                onClick={downloadBilling} 
-                disabled={!isBillingValid || isBillingLoading}
-                className="w-full h-11 rounded-xl bg-purple-600 hover:bg-purple-700 text-white shadow-lg shadow-purple-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
-              >
-                {isBillingLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Generating Report...
-                  </>
-                ) : (
-                  <>
-                    <Download className="mr-2 h-4 w-4" /> Generate Billing Report
-                  </>
-                )}
-              </Button>
-            </div>
+            <Button 
+              onClick={downloadBilling} 
+              disabled={!isBillingValid || isBillingLoading}
+              size="lg"
+              className="w-full h-14 text-base font-bold rounded-2xl bg-purple-600 hover:bg-purple-700 text-white shadow-xl shadow-purple-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none mt-4"
+            >
+              {isBillingLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                  Generating Billing...
+                </>
+              ) : (
+                <>
+                  <Receipt className="mr-2 h-5 w-5" /> Generate Billing
+                </>
+              )}
+            </Button>
           </CardContent>
         </Card>
-      </div>
-
-      {/* Info Tips */}
-      <div className="mt-6 p-6 rounded-[24px] bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-800">
-        <h4 className="font-bold text-slate-900 dark:text-white mb-2">Reporting Guide</h4>
-        <ul className="text-sm text-slate-500 dark:text-slate-400 space-y-2 list-disc pl-4">
-          <li><strong>Daily Manifest:</strong> Useful for drivers and delivery tracking. It includes all shipments created on the selected date.</li>
-          <li><strong>Account Billing:</strong> Only includes entries marked as "Account" status. Useful for generating weekly or monthly customer invoices.</li>
-          <li>Both reports are exported in .xlsx format compatible with Excel and Google Sheets.</li>
-        </ul>
+        )}
       </div>
     </div>
   );
 }
+

@@ -12,7 +12,7 @@ export async function GET(req: Request) {
     if (!session) return new NextResponse("Unauthorized", { status: 401 });
 
     const { searchParams } = new URL(req.url);
-    const fromParty = searchParams.get("fromParty");
+    const partyNames = searchParams.getAll("partyName").map(p => p.trim()).filter(Boolean);
     const startDateStr = searchParams.get("startDate");
     const endDateStr = searchParams.get("endDate");
 
@@ -36,20 +36,16 @@ export async function GET(req: Request) {
     const line1 = businessAddressLines.slice(0, 2).join(', ');
     const line2 = businessAddressLines.slice(2, 5).join(', ');
     const line3 = businessAddressLines.slice(5).join(', ');
-
-    const registerIdParam = searchParams.get("registerId");
+    const billingPartyName = searchParams.get("billingPartyName") || partyNames[0] || "";
 
     const where: any = {
       userId: (session.user as any).id,
-      status: "Account",
     };
 
-    if (registerIdParam) {
-      where.registerId = registerIdParam;
-    }
-
-    if (fromParty) {
-      where.fromParty = { contains: fromParty, mode: "insensitive" };
+    if (partyNames.length > 0) {
+      where.OR = partyNames.map(name => ({
+        fromParty: { equals: name, mode: "insensitive" }
+      }));
     }
 
     if (startDateStr || endDateStr) {
@@ -133,7 +129,7 @@ export async function GET(req: Request) {
     worksheet.mergeCells('A4:C4');
     worksheet.mergeCells('D4:F4');
     setHeaderCell('A4', businessName, "", true);
-    setHeaderCell('D4', fromParty || "", "", true);
+    setHeaderCell('D4', billingPartyName || "", "", true);
 
     // Row 5
     worksheet.mergeCells('A5:C5');
@@ -356,8 +352,8 @@ export async function GET(req: Request) {
     // ───────────────────────────────────────────
     const buffer = await workbook.xlsx.writeBuffer();
 
-    const filename = fromParty
-      ? `Invoice_${fromParty.replace(/\s+/g, '_')}.xlsx`
+    const filename = billingPartyName
+      ? `Invoice_${billingPartyName.replace(/\s+/g, '_')}.xlsx`
       : `Tax_Invoice_${new Date().toISOString().split('T')[0]}.xlsx`;
 
     const sessionUser = session.user as any;
@@ -367,8 +363,8 @@ export async function GET(req: Request) {
       role: sessionUser.role || "Staff",
       action: "INVOICE_DOWNLOAD",
       entity: "Invoice",
-      entityId: fromParty || "All",
-      newValue: JSON.stringify({ billNo, fromParty, entriesCount: entries.length }),
+      entityId: billingPartyName || "All",
+      newValue: JSON.stringify({ billNo, billingPartyName, partyNames, entriesCount: entries.length }),
       req
     });
 
