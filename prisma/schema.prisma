@@ -104,7 +104,7 @@ model CourierRegister {
   updatedAt      DateTime       @updatedAt
   courierEntries CourierEntry[]
 
-  @@unique([userId, month, year])
+  @@unique([userId, name])
 }
 
 model SystemSettings {

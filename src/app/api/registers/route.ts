@@ -97,11 +97,11 @@ export async function POST(req: Request) {
 
     // Check for duplicate register
     const existing = await prisma.courierRegister.findFirst({
-      where: { userId, month, year }
+      where: { userId, name }
     });
 
     if (existing) {
-      return NextResponse.json({ success: false, error: `A register for ${monthNames[month - 1]} ${year} already exists.` }, { status: 400 });
+      return NextResponse.json({ success: false, error: `A register with the name "${name}" already exists.` }, { status: 400 });
     }
 
     const register = await prisma.courierRegister.create({

@@ -50,12 +50,12 @@ export async function POST(req: Request) {
     for (const key of Object.keys(groups)) {
       const { month, year, ids } = groups[key];
       
+      const name = `${monthNames[month - 1]} ${year}`;
       let register = await prisma.courierRegister.findFirst({
-        where: { userId, month, year }
+        where: { userId, name }
       });
 
       if (!register) {
-        const name = `${monthNames[month - 1]} ${year}`;
         register = await prisma.courierRegister.create({
           data: {
             userId,
