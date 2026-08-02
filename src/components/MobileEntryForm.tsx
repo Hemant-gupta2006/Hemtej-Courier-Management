@@ -279,10 +279,32 @@ export function MobileEntryForm({
   }, [mobileDefaultDate, open]);
 
   const set = (key: keyof FormData, val: string) => {
-    setForm((f) => ({ ...f, [key]: val }));
+    setForm((f) => {
+      const next = { ...f, [key]: val };
+      
+      // Auto-calculate amount when weight changes
+      if (key === "weightNum" || key === "weightUnit") {
+        const wVal = Number(next.weightNum) || 0;
+        const wUnit = next.weightUnit;
+        const weightInGrams = wUnit === "kg" ? wVal * 1000 : wVal;
+        
+        if (weightInGrams > 0) {
+          const calculatedAmount = weightInGrams >= 1000 
+            ? Math.ceil(weightInGrams / 1000) * 50 
+            : Math.max(30, Math.ceil(weightInGrams / 100) * 10);
+          next.amount = String(calculatedAmount);
+        }
+      }
+      
+      return next;
+    });
+    
     setErrors((e) => {
       const n = { ...e };
       delete n[key as keyof Errors];
+      if (key === "weightNum" || key === "weightUnit") {
+        delete n.amount;
+      }
       return n;
     });
   };
