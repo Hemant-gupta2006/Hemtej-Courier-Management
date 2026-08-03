@@ -421,7 +421,9 @@ export function DataTable<TData, TValue>({
             const wUnit = columnId === "weightUnit" ? (parsedValue as string) : row.weightUnit;
             const weightInGrams = wUnit === "kg" ? wVal * 1000 : wVal;
             if (weightInGrams > 0) {
-              const calculatedAmount = Math.max(30, Math.ceil(weightInGrams / 100) * 10);
+              const calculatedAmount = weightInGrams >= 1000 
+                ? Math.ceil(weightInGrams / 1000) * 50 
+                : Math.max(30, Math.ceil(weightInGrams / 100) * 10);
               updated.amount = calculatedAmount;
             }
           }
