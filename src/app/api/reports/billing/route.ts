@@ -68,11 +68,13 @@ export async function GET(req: Request) {
       return new NextResponse("No billing entries found", { status: 404 });
     }
 
-    const grossAmount = entries.reduce((sum, entry) => sum + (entry.amount || 0), 0);
-    const cgst = grossAmount * 0.09;
-    const sgst = grossAmount * 0.09;
+    const rawGrossAmount = entries.reduce((sum, entry) => sum + (entry.amount || 0), 0);
+    const grossAmount = Number(rawGrossAmount.toFixed(2));
+    const cgst = Number((grossAmount * 0.09).toFixed(2));
+    const sgst = Number((grossAmount * 0.09).toFixed(2));
     const igst = 0;
-    const netAmount = grossAmount + cgst + sgst + igst;
+    
+    const netAmount = Number((grossAmount + cgst + sgst + igst).toFixed(2));
 
     let invoiceId: string | undefined;
 
@@ -272,7 +274,7 @@ export async function GET(req: Request) {
     inWordsLabel.border = { left: { style: 'thin' }, top: { style: 'thin' } };
 
     // Summary Labels and Values
-    const addSummaryRow = (label: string, formula: string, isFinal: boolean = false) => {
+    const addSummaryRow = (label: string, formula: string, isFinal: boolean = false, forceDecimals: boolean = false) => {
       const labelCell = worksheet.getCell(`E${currentRow}`);
       labelCell.value = label;
       labelCell.font = { bold: true, size: 10, color: label.includes('@') ? { argb: 'FF2563EB' } : undefined };
@@ -284,7 +286,7 @@ export async function GET(req: Request) {
       valueCell.font = { bold: true, size: 10 };
       valueCell.alignment = { horizontal: 'right', vertical: 'middle' };
       valueCell.border = borderStyle;
-      valueCell.numFmt = isFinal ? '#,##0.00' : '#,##0';
+      valueCell.numFmt = forceDecimals ? '#,##0.00' : '#,##0';
 
       // Ensure the "IN WORDS" area has borders on the left
       if (currentRow > endDataRow + 1) {
@@ -297,11 +299,11 @@ export async function GET(req: Request) {
     };
 
     const range = `F${startDataRow}:F${endDataRow}`;
-    addSummaryRow("Gross Amount", `SUM(${range})`);
-    addSummaryRow("CGST@9%", `F${currentRow - 1}*0.09`);
-    addSummaryRow("SGST @ 9%", `F${currentRow - 2}*0.09`);
-    addSummaryRow("IGST@18%", `0`);
-    addSummaryRow("Net Amount", `F${currentRow - 4}+F${currentRow - 3}+F${currentRow - 2}+F${currentRow - 1}`, true);
+    addSummaryRow("Gross Amount", `SUM(${range})`, false, false);
+    addSummaryRow("CGST @ 9%", `ROUND(F${currentRow - 1}*0.09, 2)`, false, true);
+    addSummaryRow("SGST @ 9%", `ROUND(F${currentRow - 2}*0.09, 2)`, false, true);
+    addSummaryRow("IGST @ 18%", `0`, false, true);
+    addSummaryRow("Net Amount", `ROUND(F${currentRow - 4}+F${currentRow - 3}+F${currentRow - 2}+F${currentRow - 1}, 2)`, true, true);
 
     // Bottom border for the "IN WORDS" and Totals area
     const lastSummaryRow = currentRow - 1;
