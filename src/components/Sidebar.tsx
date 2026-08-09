@@ -17,9 +17,11 @@ import {
   Lock,
   Archive,
   FolderClosed,
+  Merge,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRegisters } from "@/context/RegisterContext";
+import { CombineRegistersModal } from "@/components/CombineRegistersModal";
 import {
   Dialog,
   DialogContent,
@@ -61,6 +63,7 @@ export const Sidebar = () => {
 
   const [isRegistersOpen, setIsRegistersOpen] = useState(true);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isCombineOpen, setIsCombineOpen] = useState(false);
 
   // Form states for new register
   const currentYear = new Date().getFullYear();
@@ -218,7 +221,7 @@ export const Sidebar = () => {
                   </div>
 
                   {/* New Register Button */}
-                  <div className="pt-1.5 border-t border-slate-200 dark:border-slate-800/80 mt-1">
+                  <div className="pt-1.5 border-t border-slate-200 dark:border-slate-800/80 mt-1 space-y-1">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -228,6 +231,17 @@ export const Sidebar = () => {
                     >
                       <Plus className="h-3.5 w-3.5" />
                       <span>New Register</span>
+                    </button>
+                    
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setIsCombineOpen(true);
+                      }}
+                      className="flex items-center gap-2 px-3 py-1.5 w-full text-xs font-semibold text-yellow-600 dark:text-yellow-500 hover:bg-yellow-50 dark:hover:bg-yellow-950/20 rounded-lg transition-all"
+                    >
+                      <Merge className="h-3.5 w-3.5" />
+                      <span>Combine Registers</span>
                     </button>
                   </div>
                 </motion.div>
@@ -364,6 +378,12 @@ export const Sidebar = () => {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Combine Registers Modal */}
+      <CombineRegistersModal 
+        isOpen={isCombineOpen} 
+        onClose={() => setIsCombineOpen(false)} 
+      />
     </div>
   );
 };
