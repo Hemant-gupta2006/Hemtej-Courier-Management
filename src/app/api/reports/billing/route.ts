@@ -113,7 +113,7 @@ export async function GET(req: Request) {
             netAmount,
           }
         });
-        
+
         invoiceId = newInvoice.id;
 
         await prisma.courierEntry.updateMany({

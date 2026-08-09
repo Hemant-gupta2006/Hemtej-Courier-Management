@@ -99,15 +99,37 @@ export default function ReportsPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const downloadFile = async (url: string, defaultFilename: string) => {
+    const res = await fetch(url);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `Error ${res.status}`);
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('Content-Disposition');
+    let filename = defaultFilename;
+    if (disposition && disposition.includes('filename="')) {
+      filename = disposition.split('filename="')[1].split('"')[0];
+    }
+    const downloadUrl = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(downloadUrl);
+    a.remove();
+  };
+
   const downloadManifest = async () => {
     if (!isManifestValid || isManifestLoading) return;
     
     setIsManifestLoading(true);
     try {
-      window.location.href = `/api/reports/manifest?date=${manifestDate}`;
-      setTimeout(() => setIsManifestLoading(false), 2000);
-    } catch (error) {
-      toast.error("Failed to generate manifest");
+      await downloadFile(`/api/reports/manifest?date=${manifestDate}`, `Manifest_${manifestDate}.xlsx`);
+    } catch (error: any) {
+      toast.error(error.message || "Failed to generate manifest");
+    } finally {
       setIsManifestLoading(false);
     }
   };
@@ -141,10 +163,10 @@ export default function ReportsPage() {
         if (value) params.append(key, value);
       });
 
-      window.location.href = `/api/reports/billing?${params.toString()}`;
-      setTimeout(() => setIsBillingLoading(false), 2000);
-    } catch (error) {
-      toast.error("Failed to generate billing report");
+      await downloadFile(`/api/reports/billing?${params.toString()}`, `Invoice_${billingPartyName || 'Export'}.xlsx`);
+    } catch (error: any) {
+      toast.error(error.message || "Failed to generate billing report");
+    } finally {
       setIsBillingLoading(false);
     }
   };
@@ -152,7 +174,6 @@ export default function ReportsPage() {
   const handleSelectMasterParty = (party: any) => {
     setSelectedParty(party);
     setBillingPartyName(party.officialInvoiceName);
-    setBillingParties(party.aliases && party.aliases.length > 0 ? party.aliases : [party.officialInvoiceName]);
     setShowPartyDropdown(false);
     setAdvancedDetails(prev => ({
       ...prev,
@@ -208,10 +229,10 @@ export default function ReportsPage() {
     if (isMonthlyLoading) return;
     setIsMonthlyLoading(true);
     try {
-      window.location.href = `/api/reports/monthly?month=${monthlyMonth}&year=${monthlyYear}`;
-      setTimeout(() => setIsMonthlyLoading(false), 2000);
-    } catch (error) {
-      toast.error("Failed to generate monthly report");
+      await downloadFile(`/api/reports/monthly?month=${monthlyMonth}&year=${monthlyYear}`, `Monthly_Register_${monthlyMonth}_${monthlyYear}.xlsx`);
+    } catch (error: any) {
+      toast.error(error.message || "Failed to generate monthly report");
+    } finally {
       setIsMonthlyLoading(false);
     }
   };
