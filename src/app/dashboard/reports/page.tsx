@@ -152,18 +152,45 @@ export default function ReportsPage() {
         });
       }
 
-      const params = new URLSearchParams();
-      if (billingFromDate) params.append("startDate", billingFromDate);
-      if (billingToDate) params.append("endDate", billingToDate);
-      if (billingPartyName) params.append("billingPartyName", billingPartyName.trim());
-      if (selectedParty) params.append("partyId", selectedParty.id);
-      uniqueParties.forEach(p => params.append("partyName", p.trim()));
+      const payload = {
+        startDate: billingFromDate || undefined,
+        endDate: billingToDate || undefined,
+        billingPartyName: billingPartyName.trim() || undefined,
+        partyId: selectedParty?.id || undefined,
+        partyNames: uniqueParties,
+        ...advancedDetails
+      };
 
-      Object.entries(advancedDetails).forEach(([key, value]) => {
-        if (value) params.append(key, value);
+      const res = await fetch("/api/bills", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
       });
 
-      await downloadFile(`/api/reports/billing?${params.toString()}`, `Invoice_${billingPartyName || 'Export'}.xlsx`);
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to generate billing report");
+      }
+
+      // Decode base64 and trigger download
+      const binaryString = window.atob(data.data.fileBase64);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      
+      const blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = downloadUrl;
+      a.download = data.data.fileName;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(downloadUrl);
+      a.remove();
+      
+      toast.success("Bill generated successfully");
     } catch (error: any) {
       toast.error(error.message || "Failed to generate billing report");
     } finally {

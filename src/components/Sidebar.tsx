@@ -49,6 +49,12 @@ const baseRoutes = [
     color: "from-emerald-500 to-teal-500",
   },
   {
+    label: "Bill Register",
+    icon: List,
+    href: "/dashboard/bills",
+    color: "from-fuchsia-500 to-pink-500",
+  },
+  {
     label: "Settings",
     icon: Settings,
     href: "/dashboard/settings",

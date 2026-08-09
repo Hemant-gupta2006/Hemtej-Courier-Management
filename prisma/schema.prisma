@@ -122,6 +122,7 @@ model SystemSettings {
   defaultStatus  String   @default("Cash")
   invoiceTerms   String?  @default("Payment due within 15 days from invoice date. Goods once dispatched will not be returned.")
   manifestTerms  String?  @default("Subject to local jurisdiction. Handle package with care.")
+  lastBillNo     Int      @default(100)
   updatedAt      DateTime @updatedAt
 }
 
@@ -163,8 +164,12 @@ model Invoice {
   id               String   @id @default(cuid())
   userId           String
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  billNo           String?
+  billNo           String?  @unique
   invoiceDate      DateTime
+  billingFromDate  DateTime?
+  billingToDate    DateTime?
+  billingPartyNames String[]
+  status           String   @default("ACTIVE")
   partyId          String?
   party            BillingParty? @relation(fields: [partyId], references: [id], onDelete: SetNull)
   partySnapshot    Json

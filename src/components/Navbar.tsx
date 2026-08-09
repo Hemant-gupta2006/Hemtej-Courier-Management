@@ -218,6 +218,8 @@ function NavbarInner({ onToggleSidebar, isSidebarOpen }: NavbarProps) {
                 ? "Courier Registers"
                 : pathname === "/dashboard/reports"
                 ? "Reports"
+                : pathname === "/dashboard/bills"
+                ? "Bill Register"
                 : pathname === "/dashboard/all-entries"
                 ? "All Entries"
                 : "Courier Management"}
