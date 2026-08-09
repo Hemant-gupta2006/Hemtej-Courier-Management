@@ -417,7 +417,8 @@ export const columns: ColumnDef<CourierEntry>[] = [
       const localRowOffset = meta?.localRowOffset ?? 0;
       const trueTotalCount = staticTotalCount + localRowOffset;
 
-      const globalOrdinalIndex = pageIndex * pageSize + row.index;
+      const sortedIndex = table.getRowModel().rows.findIndex(r => r.id === row.id);
+      const globalOrdinalIndex = pageIndex * pageSize + (sortedIndex >= 0 ? sortedIndex : row.index);
       const displayNo = isDesc ? trueTotalCount - globalOrdinalIndex : globalOrdinalIndex + 1;
 
       return (

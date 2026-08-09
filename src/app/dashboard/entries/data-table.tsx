@@ -971,7 +971,7 @@ export function DataTable<TData, TValue>({
         const workbook = XLSX.read(bstr, { type: "binary" });
         const wsname = workbook.SheetNames[0];
         const ws = workbook.Sheets[wsname];
-        const rawData = XLSX.utils.sheet_to_json(ws);
+        const rawData = XLSX.utils.sheet_to_json(ws, { raw: true });
 
         if (!Array.isArray(rawData) || rawData.length === 0) {
           toast.error("The uploaded Excel file is empty.");
@@ -985,10 +985,30 @@ export function DataTable<TData, TValue>({
           return;
         }
 
-        const items = rawData.map((row: any) => ({
-          challanNo: row["Challan No"],
-          amount: row["Amount"],
-        })).filter(item => item.challanNo != null && item.challanNo !== "");
+        const items = rawData.map((row: any) => {
+          let parsedDate = "";
+          const rawDate = row["Date"];
+          if (typeof rawDate === "number") {
+            const d = XLSX.SSF.parse_date_code(rawDate);
+            parsedDate = `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
+          } else if (typeof rawDate === "string") {
+            // Handle if it's already a string like "2026-10-01" or "01-10-2026"
+            // For now just pass it as string, the backend can try to parse it if needed
+            parsedDate = rawDate.trim();
+          }
+
+          return {
+            challanNo: row["Challan No"],
+            amount: row["Amount"],
+            date: parsedDate,
+            fromParty: row["From Party"],
+            toParty: row["To Party"],
+            destination: row["Destination"],
+            weight: row["Weight"],
+            status: row["Status"],
+            mode: row["Mode"],
+          };
+        }).filter(item => item.challanNo != null && item.challanNo !== "");
 
         if (items.length === 0) {
           toast.error("No valid Challan Numbers found in the Excel file.");
@@ -1025,7 +1045,7 @@ export function DataTable<TData, TValue>({
     }
   };
 
-  const confirmImport = async () => {
+  const confirmImport = async (insertions: any[] = []) => {
     if (!importPreviewData || !activeRegister) return;
     setIsImporting(true);
 
@@ -1036,6 +1056,7 @@ export function DataTable<TData, TValue>({
         body: JSON.stringify({
           registerId: activeRegister.id,
           updates: importPreviewData.updates,
+          insertions,
           fileName: importFileName,
           totalRows: importPreviewData.totalRows,
           notFoundCount: importPreviewData.notFound.length,
@@ -1045,18 +1066,37 @@ export function DataTable<TData, TValue>({
 
       const json = await res.json();
       if (json.success) {
-        toast.success(`Successfully updated ${json.data.updatedCount} couriers.`);
+        toast.success(`Successfully updated ${json.data.updatedCount} and added ${json.data.insertedCount} couriers.`);
         setIsImportModalOpen(false);
         refreshRegisters();
-        // Option to reload table data? Yes, if we update the local data state.
-        // Easiest way is to manually apply updates to dataRef and setData
-        const nextData = dataRef.current.map(row => {
+        
+        // Optimistically apply updates to the table
+        let nextData = dataRef.current.map(row => {
           const update = importPreviewData.updates.find(u => Number(u.challanNo) === Number(row.challanNo));
           if (update) {
-            return { ...row, amount: update.newAmount };
+            const nextRow = { ...row };
+            for (const change of update.changes) {
+              if (change.internalKey === "date") {
+                (nextRow as any).date = change.newValue ? new Date(change.newValue) : new Date();
+              } else if (change.internalKey === "weight") {
+                nextRow.weightValue = change.internalVal.value;
+                nextRow.weightUnit = change.internalVal.unit;
+              } else if (change.internalKey === "amount") {
+                nextRow.amount = Number(change.newValue);
+              } else if (["fromParty", "toParty", "destination", "status", "mode"].includes(change.internalKey)) {
+                (nextRow as any)[change.internalKey] = change.newValue;
+              }
+            }
+            return nextRow;
           }
           return row;
         });
+
+        // Insert new rows returned from backend (so we have proper IDs and default fields)
+        if (json.data.insertedRecords && Array.isArray(json.data.insertedRecords)) {
+          nextData = [...json.data.insertedRecords, ...nextData];
+        }
+
         dataRef.current = nextData;
         setData(nextData);
       } else {
