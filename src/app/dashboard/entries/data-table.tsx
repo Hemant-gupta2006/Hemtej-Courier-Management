@@ -28,12 +28,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CourierEntry } from "@prisma/client";
-import { PlusCircle, Download, Settings2, RefreshCw, Search, X, Calendar } from "lucide-react";
+import { PlusCircle, Download, Upload, Settings2, RefreshCw, Search, X, Calendar } from "lucide-react";
 import { toast } from "sonner";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import * as XLSX from "xlsx";
 import { useRegisters } from "@/context/RegisterContext";
 import { getAutocompleteData, clearAutocompleteCache } from "@/lib/autocomplete";
+import { ImportPreviewModal, PreviewData } from "@/components/ImportPreviewModal";
 
 interface BatchDefaults {
   date: string;
@@ -227,6 +228,13 @@ export function DataTable<TData, TValue>({
   const nextChallanRef = useRef<number | null>(null);
   const isSavingRef = useRef(false);
   const lastActiveRegisterIdRef = useRef<string | null>(null);
+
+  // Import State
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importPreviewData, setImportPreviewData] = useState<PreviewData | null>(null);
+  const [importFileName, setImportFileName] = useState<string>("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isReadOnly = activeRegister?.status === "Locked" || activeRegister?.status === "Archived";
 
@@ -744,51 +752,62 @@ export function DataTable<TData, TValue>({
         mode: targetRow.mode,
       };
 
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 10000);
+      // ── OPTIMISTIC UI: Instantly mark as saved ──
+      const previousData = dataRef.current;
+      const next = dataRef.current.map((r) =>
+        (r.tempId || r.id) === identifier ? { ...r, isEdited: false } : r
+      );
+      dataRef.current = next;
+      setData(next);
 
-        const res = await fetch(`/api/couriers/${targetRow.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
+      // ── BACKGROUND SAVE ──
+      (async () => {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-        if (res.ok) {
-          const next = dataRef.current.map((r) =>
-            (r.tempId || r.id) === identifier ? { ...r, isEdited: false } : r
-          );
-          dataRef.current = next;
-          setData(next);
-          toast.success("Courier entry updated!");
-          refreshRegisters();
-          learnAutocompleteValues(targetRow.fromParty, targetRow.toParty, targetRow.destination);
-          return true;
-        } else {
-          const err = await res.json().catch(() => ({}));
-          if (res.status === 404) {
-            toast.error("Entry not found.");
-          } else if (res.status === 500) {
-            toast.error("Server error while saving.");
+          const res = await fetch(`/api/couriers/${targetRow.id}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            signal: controller.signal,
+          });
+          clearTimeout(timeoutId);
+
+          if (res.ok) {
+            toast.success("Courier entry updated!");
+            refreshRegisters();
+            learnAutocompleteValues(targetRow.fromParty, targetRow.toParty, targetRow.destination);
           } else {
-            toast.error(err.error || `Error updating entry (${res.status})`);
+            // Revert on error
+            dataRef.current = previousData;
+            setData(previousData);
+            const err = await res.json().catch(() => ({}));
+            if (res.status === 404) {
+              toast.error("Entry not found.");
+            } else if (res.status === 500) {
+              toast.error("Server error while saving.");
+            } else {
+              toast.error(err.error || `Error updating entry (${res.status})`);
+            }
           }
-          return false;
+        } catch (e: any) {
+          // Revert on error
+          dataRef.current = previousData;
+          setData(previousData);
+          if (e.name === "AbortError") {
+            toast.error("Request timed out. Please retry.");
+          } else if (typeof navigator !== "undefined" && !navigator.onLine) {
+            toast.error("You're offline. Please check your connection.");
+          } else {
+            toast.error("Network error while updating entry");
+          }
         }
-      } catch (e: any) {
-        if (e.name === "AbortError") {
-          toast.error("Request timed out. Please retry.");
-        } else if (typeof navigator !== "undefined" && !navigator.onLine) {
-          toast.error("You're offline. Please check your connection.");
-        } else {
-          toast.error("Network error while updating entry");
-        }
-        return false;
-      }
+      })();
+
+      return true;
     },
-    [validateRow, clearAllRowErrors, triggerRowErrorUpdate, activeRegister]
+    [validateRow, clearAllRowErrors, triggerRowErrorUpdate, activeRegister, refreshRegisters, learnAutocompleteValues]
   );
 
   const handleCellKeyDown = useCallback(
@@ -940,6 +959,117 @@ export function DataTable<TData, TValue>({
     XLSX.writeFile(workbook, `Courier_Entries_${new Date().toISOString().split("T")[0]}.xlsx`);
   }, [data]);
 
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeRegister) return;
+    setImportFileName(file.name);
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const workbook = XLSX.read(bstr, { type: "binary" });
+        const wsname = workbook.SheetNames[0];
+        const ws = workbook.Sheets[wsname];
+        const rawData = XLSX.utils.sheet_to_json(ws);
+
+        if (!Array.isArray(rawData) || rawData.length === 0) {
+          toast.error("The uploaded Excel file is empty.");
+          return;
+        }
+
+        // Validate Headers
+        const firstRow = rawData[0] as any;
+        if (!("Challan No" in firstRow) || !("Amount" in firstRow)) {
+          toast.error("Invalid Excel format. Must contain 'Challan No' and 'Amount' headers.");
+          return;
+        }
+
+        const items = rawData.map((row: any) => ({
+          challanNo: row["Challan No"],
+          amount: row["Amount"],
+        })).filter(item => item.challanNo != null && item.challanNo !== "");
+
+        if (items.length === 0) {
+          toast.error("No valid Challan Numbers found in the Excel file.");
+          return;
+        }
+
+        // Call Preview API
+        toast.loading("Analyzing Excel file...", { id: "excel-preview" });
+        const res = await fetch("/api/couriers/import-preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ registerId: activeRegister.id, items })
+        });
+        
+        const json = await res.json();
+        toast.dismiss("excel-preview");
+
+        if (json.success) {
+          setImportPreviewData(json.data);
+          setIsImportModalOpen(true);
+        } else {
+          toast.error(json.error || "Failed to generate import preview");
+        }
+      } catch (err) {
+        console.error(err);
+        toast.dismiss("excel-preview");
+        toast.error("Error reading the Excel file.");
+      }
+    };
+    reader.readAsBinaryString(file);
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const confirmImport = async () => {
+    if (!importPreviewData || !activeRegister) return;
+    setIsImporting(true);
+
+    try {
+      const res = await fetch("/api/couriers/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          registerId: activeRegister.id,
+          updates: importPreviewData.updates,
+          fileName: importFileName,
+          totalRows: importPreviewData.totalRows,
+          notFoundCount: importPreviewData.notFound.length,
+          duplicatesCount: importPreviewData.duplicates.length
+        })
+      });
+
+      const json = await res.json();
+      if (json.success) {
+        toast.success(`Successfully updated ${json.data.updatedCount} couriers.`);
+        setIsImportModalOpen(false);
+        refreshRegisters();
+        // Option to reload table data? Yes, if we update the local data state.
+        // Easiest way is to manually apply updates to dataRef and setData
+        const nextData = dataRef.current.map(row => {
+          const update = importPreviewData.updates.find(u => Number(u.challanNo) === Number(row.challanNo));
+          if (update) {
+            return { ...row, amount: update.newAmount };
+          }
+          return row;
+        });
+        dataRef.current = nextData;
+        setData(nextData);
+      } else {
+        toast.error(json.error || "Failed to process import");
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Network error during import");
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   const localRowOffset = useMemo(() => {
     return data.filter((r) => r.isNew).length;
   }, [data]);
@@ -979,7 +1109,10 @@ export function DataTable<TData, TValue>({
           onStatusFilterChange?.(status);
           onApplyFilters?.();
         }
-      } : undefined
+      } : undefined,
+      autoSaveRow: (id: string) => {
+        saveEditedRow(id);
+      }
     }),
     [
       updateData,
@@ -1066,13 +1199,29 @@ export function DataTable<TData, TValue>({
           </div>
 
           <div className="flex items-center gap-2 ml-auto">
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept=".xlsx, .xls"
+              onChange={handleFileUpload}
+              className="hidden"
+            />
+            <Button
+              onClick={() => fileInputRef.current?.click()}
+              variant="outline"
+              disabled={isReadOnly}
+              className="h-9 rounded-xl bg-white/10 dark:bg-slate-900/50 backdrop-blur-xl border border-white/20 dark:border-white/10 hover:bg-white/20 text-sm font-medium shadow-sm px-3"
+            >
+              <Upload className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Import</span>
+            </Button>
             <Button
               onClick={onExportExcel || exportExcel}
               variant="outline"
               className="h-9 rounded-xl bg-white/10 dark:bg-slate-900/50 backdrop-blur-xl border border-white/20 dark:border-white/10 hover:bg-white/20 text-sm font-medium shadow-sm px-3"
             >
               <Download className="h-4 w-4 sm:mr-2" />
-              <span className="hidden sm:inline">Export Excel</span>
+              <span className="hidden sm:inline">Export</span>
             </Button>
             <Button
               disabled={isReadOnly}
@@ -1235,6 +1384,15 @@ export function DataTable<TData, TValue>({
           </Table>
         </div>
       </div>
+
+      <ImportPreviewModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        previewData={importPreviewData}
+        onConfirm={confirmImport}
+        isImporting={isImporting}
+        fileName={importFileName}
+      />
     </div>
   );
 }

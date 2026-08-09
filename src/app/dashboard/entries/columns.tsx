@@ -43,6 +43,7 @@ declare module "@tanstack/react-table" {
       onApplyFilters: () => void;
       onApplyStatusFilter: (status: string) => void;
     };
+    autoSaveRow?: (identifier: string) => void;
   }
 }
 
@@ -126,7 +127,14 @@ const AutocompleteCell = ({ getValue, row, column, table }: any) => {
 
   const onBlur = () => {
     if (isReadOnly) return;
-    table.options.meta?.updateData(identifier, column.id, value);
+    if (value !== parentVal) {
+      table.options.meta?.updateData(identifier, column.id, value);
+      if (!row.original.isNew) {
+        setTimeout(() => {
+          table.options.meta?.autoSaveRow?.(identifier);
+        }, 50);
+      }
+    }
     setSuggestion("");
   };
 
@@ -179,7 +187,14 @@ const EditableCell = ({ getValue, row, column, table }: any) => {
   const onBlur = () => {
     if (isReadOnly) return;
     const valToSave = column.id === "amount" || column.id === "challanNo" ? (parseFloat(value) || 0) : value;
-    table.options.meta?.updateData(identifier, column.id, valToSave);
+    if (String(valToSave) !== String(parentVal)) {
+      table.options.meta?.updateData(identifier, column.id, valToSave);
+      if (!row.original.isNew) {
+        setTimeout(() => {
+          table.options.meta?.autoSaveRow?.(identifier);
+        }, 50);
+      }
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -324,8 +339,15 @@ const WeightCell = ({ getValue, row, column, table }: any) => {
   const onBlur = () => {
     if (isReadOnly) return;
     const val = parseFloat(num) || 0;
-    table.options.meta?.updateData(identifier, "weightValue", val);
-    table.options.meta?.updateData(identifier, "weightUnit", unit);
+    if (val !== parseFloat(parentNum) || unit !== parentUnit) {
+      table.options.meta?.updateData(identifier, "weightValue", val);
+      table.options.meta?.updateData(identifier, "weightUnit", unit);
+      if (!row.original.isNew) {
+        setTimeout(() => {
+          table.options.meta?.autoSaveRow?.(identifier);
+        }, 50);
+      }
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
