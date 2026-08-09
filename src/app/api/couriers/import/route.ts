@@ -191,6 +191,9 @@ export async function POST(req: Request) {
       });
 
       return { updatedCount, conflictCount, insertedCount, insertedRecords };
+    }, {
+      maxWait: 5000, // 5 seconds max wait to acquire the transaction
+      timeout: 60000 // 60 seconds transaction timeout
     });
 
     return NextResponse.json({
