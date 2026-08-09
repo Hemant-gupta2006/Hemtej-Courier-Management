@@ -404,6 +404,16 @@ export default function ReportsPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Bill Number (Optional)</label>
+              <Input 
+                placeholder="e.g. 199" 
+                value={advancedDetails.billNo}
+                onChange={(e) => setAdvancedDetails({...advancedDetails, billNo: e.target.value})}
+                className="rounded-xl h-11 bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 focus-visible:ring-purple-500/30 max-w-sm"
+              />
+            </div>
+            
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="space-y-2 md:col-span-2">
                 <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">From Date</label>
@@ -466,18 +476,20 @@ export default function ReportsPage() {
                     <span>{currentAliasFiltered[0].slice(currentAlias.length)}</span>
                   </div>
                 )}
-                <Input
+                  <Input
                   placeholder="+ Add Alias (Press Enter)"
                   value={currentAlias}
                   onChange={(e) => setCurrentAlias(e.target.value)}
+                  enterKeyHint="enter"
                   onKeyDown={(e) => {
                     const suggestion = currentAliasFiltered[0];
                     const isSuggestionVisible = suggestion && suggestion.toLowerCase().startsWith(currentAlias.toLowerCase()) && suggestion.toLowerCase() !== currentAlias.toLowerCase();
+                    const isEnter = e.key === "Enter" || e.keyCode === 13;
 
-                    if ((e.key === "Tab" || e.key === "Enter") && isSuggestionVisible) {
+                    if ((e.key === "Tab" || isEnter) && isSuggestionVisible) {
                       e.preventDefault();
                       setCurrentAlias(suggestion);
-                    } else if (e.key === "Enter") {
+                    } else if (isEnter) {
                       e.preventDefault();
                       addAlias(currentAlias);
                     }
@@ -513,6 +525,7 @@ export default function ReportsPage() {
                       <Input
                         placeholder="Search and select a party..."
                         value={billingPartyName}
+                        enterKeyHint="enter"
                         onChange={(e) => {
                           setBillingPartyName(e.target.value);
                           if (selectedParty && e.target.value !== selectedParty.officialInvoiceName) {
@@ -520,7 +533,8 @@ export default function ReportsPage() {
                           }
                         }}
                         onKeyDown={(e) => {
-                          if ((e.key === "Tab" || e.key === "Enter") && isSuggestionVisible) {
+                          const isEnter = e.key === "Enter" || e.keyCode === 13;
+                          if ((e.key === "Tab" || isEnter) && isSuggestionVisible) {
                             e.preventDefault();
                             const matchingParty = masterParties.find(p => p.officialInvoiceName === masterSuggestion);
                             if (matchingParty) {
@@ -578,16 +592,7 @@ export default function ReportsPage() {
                   {/* Invoice Info */}
                   <div className="space-y-4">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Invoice Information</h4>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label>Bill Number</Label>
-                        <Input 
-                          placeholder="e.g. 199" 
-                          value={advancedDetails.billNo}
-                          onChange={(e) => setAdvancedDetails({...advancedDetails, billNo: e.target.value})}
-                          className="rounded-xl"
-                        />
-                      </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label>Invoice Date</Label>
                         <Input 
