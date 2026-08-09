@@ -12,6 +12,7 @@ export async function GET(req: Request) {
     if (!session) return new NextResponse("Unauthorized", { status: 401 });
 
     const { searchParams } = new URL(req.url);
+    const partyId = searchParams.get("partyId") || undefined;
     const partyNames = searchParams.getAll("partyName").map(p => p.trim()).filter(Boolean);
     const startDateStr = searchParams.get("startDate");
     const endDateStr = searchParams.get("endDate");
@@ -67,6 +68,60 @@ export async function GET(req: Request) {
       return new NextResponse("No billing entries found", { status: 404 });
     }
 
+    const grossAmount = entries.reduce((sum, entry) => sum + (entry.amount || 0), 0);
+    const cgst = grossAmount * 0.09;
+    const sgst = grossAmount * 0.09;
+    const igst = 0;
+    const netAmount = grossAmount + cgst + sgst + igst;
+
+    let invoiceId: string | undefined;
+
+    if (partyId) {
+      const party = await prisma.billingParty.findUnique({ where: { id: partyId } });
+      if (party) {
+        const partySnapshot = {
+          officialInvoiceName: party.officialInvoiceName,
+          addressLine1: partyAddress1 || party.addressLine1,
+          addressLine2: partyAddress2 || party.addressLine2,
+          city: partyCity || party.city,
+          state: partyState || party.state,
+          pincode: partyPincode || party.pincode,
+          contactNumber: partyContact || party.contactNumber,
+          gstNumber: partyGst || party.gstNumber,
+        };
+
+        const businessSnapshot = {
+          businessName,
+          businessAddress,
+          businessContact,
+          businessGst
+        };
+
+        const newInvoice = await prisma.invoice.create({
+          data: {
+            userId: (session.user as any).id,
+            billNo: billNo || null,
+            invoiceDate: new Date(invoiceDateStr),
+            partyId,
+            partySnapshot,
+            businessSnapshot,
+            entriesCount: entries.length,
+            grossAmount,
+            cgst,
+            sgst,
+            igst,
+            netAmount,
+          }
+        });
+        
+        invoiceId = newInvoice.id;
+
+        await prisma.courierEntry.updateMany({
+          where: { id: { in: entries.map(e => e.id) } },
+          data: { invoiceId }
+        });
+      }
+    }
 
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Account Billing", {
@@ -363,8 +418,8 @@ export async function GET(req: Request) {
       role: sessionUser.role || "Staff",
       action: "INVOICE_DOWNLOAD",
       entity: "Invoice",
-      entityId: billingPartyName || "All",
-      newValue: JSON.stringify({ billNo, billingPartyName, partyNames, entriesCount: entries.length }),
+      entityId: invoiceId || billingPartyName || "All",
+      newValue: JSON.stringify({ invoiceId, billNo, billingPartyName, partyNames, entriesCount: entries.length, netAmount }),
       req
     });
 

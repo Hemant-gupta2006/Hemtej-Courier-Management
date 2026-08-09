@@ -59,7 +59,8 @@ model User {
   sessions            Session[]
   courierEntries      CourierEntry[]
   courierRegisters    CourierRegister[]
-  billingAliasGroups  BillingAliasGroup[]
+  billingParties      BillingParty[]
+  invoices            Invoice[]
 }
 
 model VerificationToken {
@@ -89,6 +90,8 @@ model CourierEntry {
   updatedAt   DateTime @updatedAt
   registerId  String?
   register    CourierRegister? @relation(fields: [registerId], references: [id], onDelete: Cascade)
+  invoiceId   String?
+  invoice     Invoice?         @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
 
   @@unique([challanNo, userId])
 }
@@ -134,36 +137,46 @@ model AuditLog {
   timestamp DateTime @default(now())
 }
 
-model BillingAliasGroup {
+model BillingParty {
+  id                  String   @id @default(cuid())
+  userId              String
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  aliases             String[]
+  officialInvoiceName String
+  addressLine1        String?
+  addressLine2        String?
+  city                String?
+  state               String?
+  pincode             String?
+  contactNumber       String?
+  gstNumber           String?
+  isArchived          Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  invoices            Invoice[]
+
+  @@unique([userId, officialInvoiceName])
+}
+
+model Invoice {
   id               String   @id @default(cuid())
   userId           String
-  billingPartyName String
-  
-  // Future-proofing fields
-  gstNumber        String?
-  address          String?
-  city             String?
-  state            String?
-  pincode          String?
-  contactPerson    String?
-  mobileNumber     String?
-  email            String?
-
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  billNo           String?
+  invoiceDate      DateTime
+  partyId          String?
+  party            BillingParty? @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  partySnapshot    Json
+  businessSnapshot Json?
+  entriesCount     Int      @default(0)
+  grossAmount      Float    @default(0)
+  cgst             Float    @default(0)
+  sgst             Float    @default(0)
+  igst             Float    @default(0)
+  netAmount        Float    @default(0)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  aliases          BillingAlias[]
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, billingPartyName])
-}
-
-model BillingAlias {
-  id        String   @id @default(cuid())
-  groupId   String
-  aliasName String
-  
-  group     BillingAliasGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  
-  @@unique([groupId, aliasName])
+  courierEntries   CourierEntry[]
 }

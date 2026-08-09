@@ -5,11 +5,12 @@ import { Download, Receipt, Calendar, User, Settings2, Loader2, AlertCircle, Dat
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import { getAutocompleteData } from "@/lib/autocomplete";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { PartyFormModal } from "@/components/PartyFormModal";
 
 export default function ReportsPage() {
   const [manifestDate, setManifestDate] = useState(new Date().toISOString().split('T')[0]);
@@ -23,6 +24,13 @@ export default function ReportsPage() {
   const [saveAliases, setSaveAliases] = useState(false);
   const [parties, setParties] = useState<string[]>([]);
   const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+  
+  // Party Master State
+  const [masterParties, setMasterParties] = useState<any[]>([]);
+  const [selectedParty, setSelectedParty] = useState<any | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [showPartyDropdown, setShowPartyDropdown] = useState(false);
+  const partySearchRef = useRef<HTMLDivElement>(null);
   const [advancedDetails, setAdvancedDetails] = useState({
     billNo: "",
     invoiceDate: new Date().toISOString().split('T')[0],
@@ -66,6 +74,29 @@ export default function ReportsPage() {
     getAutocompleteData().then(data => {
       setParties(data.fromParties || []);
     });
+    fetchParties();
+  }, []);
+
+  const fetchParties = async () => {
+    try {
+      const res = await fetch("/api/billing/parties");
+      const data = await res.json();
+      if (data.success) {
+        setMasterParties(data.data);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (partySearchRef.current && !partySearchRef.current.contains(event.target as Node)) {
+        setShowPartyDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   const downloadManifest = async () => {
@@ -103,6 +134,7 @@ export default function ReportsPage() {
       if (billingFromDate) params.append("startDate", billingFromDate);
       if (billingToDate) params.append("endDate", billingToDate);
       if (billingPartyName) params.append("billingPartyName", billingPartyName.trim());
+      if (selectedParty) params.append("partyId", selectedParty.id);
       uniqueParties.forEach(p => params.append("partyName", p.trim()));
 
       Object.entries(advancedDetails).forEach(([key, value]) => {
@@ -117,8 +149,30 @@ export default function ReportsPage() {
     }
   };
 
+  const handleSelectMasterParty = (party: any) => {
+    setSelectedParty(party);
+    setBillingPartyName(party.officialInvoiceName);
+    setBillingParties(party.aliases && party.aliases.length > 0 ? party.aliases : [party.officialInvoiceName]);
+    setShowPartyDropdown(false);
+    setAdvancedDetails(prev => ({
+      ...prev,
+      partyAddress1: party.addressLine1 || "",
+      partyAddress2: party.addressLine2 || "",
+      partyCity: party.city || "",
+      partyState: party.state || "",
+      partyPincode: party.pincode || "",
+      partyContact: party.contactNumber || "",
+      partyGst: party.gstNumber || "",
+    }));
+  };
+
+  const handlePartyModalSave = (party: any) => {
+    fetchParties();
+    handleSelectMasterParty(party);
+  };
+
   useEffect(() => {
-    if (!billingPartyName.trim()) return;
+    if (!billingPartyName.trim() || selectedParty) return;
     
     const delayDebounceFn = setTimeout(async () => {
       try {
@@ -135,7 +189,7 @@ export default function ReportsPage() {
     }, 500);
 
     return () => clearTimeout(delayDebounceFn);
-  }, [billingPartyName]);
+  }, [billingPartyName, selectedParty]);
 
   const addAlias = (alias: string) => {
     if (alias.trim() && !billingParties.includes(alias.trim())) {
@@ -414,17 +468,60 @@ export default function ReportsPage() {
             </div>
 
             <div className="pt-2 space-y-3">
-              <label className="text-sm font-semibold flex items-center gap-2 text-slate-700 dark:text-slate-300">
-                Official Invoice Name
-              </label>
-              <div className="relative">
-                <Input
-                  placeholder="e.g. Reliance Industries Ltd"
-                  value={billingPartyName}
-                  onChange={(e) => setBillingPartyName(e.target.value)}
-                  className="rounded-xl h-12 text-base font-medium bg-white dark:bg-slate-950 border-slate-300 dark:border-slate-700 shadow-sm transition-colors focus-visible:ring-purple-500/30"
-                />
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-semibold flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                  Select Billing Party (Master)
+                </label>
+                <Button variant="ghost" size="sm" onClick={() => { setSelectedParty(null); setIsModalOpen(true); }} className="h-8 px-2 text-purple-600 hover:text-purple-700 hover:bg-purple-50 dark:hover:bg-purple-900/20">
+                  <Plus className="h-4 w-4 mr-1" /> Add New
+                </Button>
               </div>
+              <div className="relative bg-white dark:bg-slate-950 rounded-xl" ref={partySearchRef}>
+                {(() => {
+                  const masterSuggestion = masterParties.find(p => p.officialInvoiceName.toLowerCase().startsWith(billingPartyName.toLowerCase()))?.officialInvoiceName;
+                  const isSuggestionVisible = billingPartyName.length > 0 && masterSuggestion && masterSuggestion.toLowerCase().startsWith(billingPartyName.toLowerCase()) && masterSuggestion.toLowerCase() !== billingPartyName.toLowerCase();
+
+                  return (
+                    <>
+                      {isSuggestionVisible && (
+                        <div className="absolute inset-0 flex items-center px-3 pointer-events-none text-slate-400 dark:text-slate-500 z-0 h-12 text-base font-medium">
+                          <span className="opacity-0">{billingPartyName}</span>
+                          <span>{masterSuggestion.slice(billingPartyName.length)}</span>
+                        </div>
+                      )}
+                      <Input
+                        placeholder="Search and select a party..."
+                        value={billingPartyName}
+                        onChange={(e) => {
+                          setBillingPartyName(e.target.value);
+                          if (selectedParty && e.target.value !== selectedParty.officialInvoiceName) {
+                            setSelectedParty(null);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if ((e.key === "Tab" || e.key === "Enter") && isSuggestionVisible) {
+                            e.preventDefault();
+                            const matchingParty = masterParties.find(p => p.officialInvoiceName === masterSuggestion);
+                            if (matchingParty) {
+                              handleSelectMasterParty(matchingParty);
+                            }
+                          }
+                        }}
+                        className="rounded-xl h-12 text-base font-medium border-slate-300 dark:border-slate-700 shadow-sm transition-colors focus-visible:ring-purple-500/30 relative z-10"
+                        style={{ backgroundColor: 'transparent' }}
+                      />
+                    </>
+                  );
+                })()}
+              </div>
+
+              {selectedParty && (
+                <div className="flex justify-end">
+                  <Button variant="link" size="sm" onClick={() => setIsModalOpen(true)} className="h-auto p-0 text-xs text-slate-500 hover:text-purple-600">
+                    Edit {selectedParty.officialInvoiceName} details
+                  </Button>
+                </div>
+              )}
 
               <div className="flex items-center space-x-3 pt-2">
                 <div className="flex items-center justify-center">
@@ -621,6 +718,13 @@ export default function ReportsPage() {
         </Card>
         )}
       </div>
+
+      <PartyFormModal 
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        onSave={handlePartyModalSave}
+        initialData={selectedParty}
+      />
     </div>
   );
 }

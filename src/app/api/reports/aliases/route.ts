@@ -15,25 +15,20 @@ export async function GET(req: Request) {
       return new NextResponse("Missing billingPartyName", { status: 400 });
     }
 
-    const group = await prisma.billingAliasGroup.findUnique({
+    const party = await prisma.billingParty.findFirst({
       where: {
-        userId_billingPartyName: {
-          userId: (session.user as any).id,
-          billingPartyName,
-        }
-      },
-      include: {
-        aliases: true,
+        userId: (session.user as any).id,
+        officialInvoiceName: { equals: billingPartyName, mode: 'insensitive' },
       }
     });
 
-    if (!group) {
+    if (!party) {
       return NextResponse.json({ success: true, data: { aliases: [] } });
     }
 
     return NextResponse.json({
       success: true,
-      data: { aliases: group.aliases.map(a => a.aliasName) }
+      data: { aliases: party.aliases }
     });
   } catch (error) {
     console.error("[ALIASES_GET_ERROR]", error);
@@ -55,34 +50,31 @@ export async function POST(req: Request) {
 
     const userId = (session.user as any).id;
 
-    // We use a transaction to upsert the group and recreate the aliases
+    // Use a transaction to upsert the group and recreate the aliases
     await prisma.$transaction(async (tx) => {
-      const group = await tx.billingAliasGroup.upsert({
+      let party = await tx.billingParty.findFirst({
         where: {
-          userId_billingPartyName: {
-            userId,
-            billingPartyName,
-          }
-        },
-        update: {},
-        create: {
           userId,
-          billingPartyName,
+          officialInvoiceName: { equals: billingPartyName, mode: 'insensitive' },
         }
       });
-
-      // Delete existing aliases for this group
-      await tx.billingAlias.deleteMany({
-        where: { groupId: group.id }
-      });
-
-      // Insert new aliases
-      if (aliases.length > 0) {
-        await tx.billingAlias.createMany({
-          data: aliases.map((aliasName: string) => ({
-            groupId: group.id,
-            aliasName,
-          }))
+      
+      const distinctAliases = Array.from(new Set(aliases)) as string[];
+      
+      if (party) {
+        await tx.billingParty.update({
+          where: { id: party.id },
+          data: {
+            aliases: { set: distinctAliases }
+          }
+        });
+      } else {
+        await tx.billingParty.create({
+          data: {
+            userId,
+            officialInvoiceName: billingPartyName,
+            aliases: distinctAliases,
+          }
         });
       }
     });
