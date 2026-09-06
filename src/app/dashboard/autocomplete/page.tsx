@@ -46,8 +46,6 @@ const CATEGORY_TABS = [
   { key: "fromParty", label: "From Party (Sender)" },
   { key: "toParty", label: "To Party (Consignee)" },
   { key: "destination", label: "Destinations" },
-  { key: "billingMaster", label: "Billing Masters" },
-  { key: "system", label: "System Enums" },
 ];
 
 export default function AutoCompleteSuggestionsPage() {
@@ -255,7 +253,7 @@ export default function AutoCompleteSuggestionsPage() {
             Auto Complete Suggestions
           </h2>
           <p className="text-muted-foreground mt-1 text-sm">
-            Global suggestion and convention directory powering auto-complete across courier registers and bill generation
+            Live directory of auto-complete suggestions used when booking entries across courier registers
           </p>
         </div>
 
@@ -274,43 +272,6 @@ export default function AutoCompleteSuggestionsPage() {
         </div>
       </div>
 
-      {/* Informational Callout Banner */}
-      <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-50/80 via-indigo-50/80 to-purple-50/80 dark:from-blue-950/30 dark:via-indigo-950/30 dark:to-purple-950/30 border border-indigo-200/50 dark:border-indigo-900/50 text-xs text-slate-700 dark:text-slate-300 space-y-2">
-        <div className="flex items-center gap-2 font-bold text-indigo-900 dark:text-indigo-200 text-sm">
-          <Info className="h-4 w-4 text-indigo-600 dark:text-indigo-400 shrink-0" />
-          How Autocomplete & Suggestions Work in Courier Management
-        </div>
-        <p className="leading-relaxed">
-          When booking in registers or generating bills, the application suggests names dynamically across multiple sources:
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-          <div className="p-2.5 rounded-xl bg-white/70 dark:bg-slate-900/70 border border-indigo-100 dark:border-indigo-900/50">
-            <span className="font-bold text-indigo-700 dark:text-indigo-300 block mb-0.5">
-              1. Database Booking History
-            </span>
-            <span>
-              Every entry booked in the registers is indexed. Frequently used senders, consignees, and destinations are ranked by count.
-            </span>
-          </div>
-          <div className="p-2.5 rounded-xl bg-white/70 dark:bg-slate-900/70 border border-indigo-100 dark:border-indigo-900/50">
-            <span className="font-bold text-purple-700 dark:text-purple-300 block mb-0.5">
-              2. Billing Master Parties
-            </span>
-            <span>
-              Official registered invoice names and aliases stored in the Billing Party Master table, used for GST bill generation.
-            </span>
-          </div>
-          <div className="p-2.5 rounded-xl bg-white/70 dark:bg-slate-900/70 border border-indigo-100 dark:border-indigo-900/50">
-            <span className="font-bold text-amber-700 dark:text-amber-300 block mb-0.5">
-              3. In-Memory Session Cache
-            </span>
-            <span>
-              Suggestions are held in client memory during your active session so keystrokes remain instantaneous.
-            </span>
-          </div>
-        </div>
-      </div>
-
       {/* Directory Card */}
       <Card className="border-white/20 dark:border-white/10 bg-white/50 dark:bg-slate-900/50 backdrop-blur-xl shadow-xl rounded-[24px] overflow-hidden">
         <CardHeader className="pb-4">
@@ -318,10 +279,10 @@ export default function AutoCompleteSuggestionsPage() {
             <div>
               <CardTitle className="text-xl flex items-center gap-2.5">
                 <Sparkles className="h-5 w-5 text-amber-500" />
-                Stored Suggestion & Convention Directory
+                Stored Suggestion Directory
               </CardTitle>
               <CardDescription className="text-xs mt-1">
-                Live transparency into all convention data responsible for suggestions, with exact occurrences and master linkage.
+                Suggestions recorded from booking history, ranked by usage frequency.
               </CardDescription>
             </div>
 
@@ -391,15 +352,69 @@ export default function AutoCompleteSuggestionsPage() {
             </div>
           ) : (
             <>
-              <div className="overflow-x-auto">
+              {/* Mobile View: Vertical Cards / Boxes */}
+              <div className="block md:hidden divide-y divide-slate-100 dark:divide-slate-800/80 p-3 space-y-3">
+                {items.map((item, idx) => (
+                  <div
+                    key={`mobile-${item.type}-${item.storedValue}-${idx}`}
+                    className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                          {item.type}
+                        </span>
+                        <h4 className="font-bold text-base text-slate-900 dark:text-slate-100 mt-0.5">
+                          {item.storedValue}
+                        </h4>
+                        {item.aliases && item.aliases.length > 0 && (
+                          <div className="text-[11px] text-muted-foreground mt-0.5">
+                            Aliases: {item.aliases.join(", ")}
+                          </div>
+                        )}
+                      </div>
+                      <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200/50 dark:border-purple-800/40 shrink-0">
+                        {item.count} {item.count === 1 ? "entry" : "entries"}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 pt-1 border-t border-slate-100 dark:border-slate-800/60">
+                      {item.canRename && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleOpenRename(item.fieldKey, item.storedValue, item.type)}
+                          className="flex-1 h-8 rounded-xl text-xs font-semibold text-indigo-600 border-indigo-200/80 hover:bg-indigo-50 dark:border-indigo-900/60 dark:hover:bg-indigo-950/30"
+                        >
+                          <Edit2 className="h-3.5 w-3.5 mr-1" />
+                          Rename
+                        </Button>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleOpenDelete(item)}
+                        className={cn(
+                          "h-8 px-3 rounded-xl text-xs text-rose-600 border-rose-200/80 hover:bg-rose-50 dark:border-rose-900/60 dark:text-rose-400 dark:hover:bg-rose-900/20",
+                          !item.canRename && "w-full"
+                        )}
+                      >
+                        <Trash2 className="h-3.5 w-3.5 mr-1" />
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop View: Clean Table */}
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-left text-sm border-collapse">
                   <thead>
                     <tr className="border-y border-slate-200/80 dark:border-slate-800/80 bg-slate-50/75 dark:bg-slate-900/50 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                      <th className="py-3 px-4">Field / Type</th>
-                      <th className="py-3 px-4">Stored Name / Value</th>
-                      <th className="py-3 px-4">Source Layer</th>
+                      <th className="py-3 px-4">Field / Category</th>
+                      <th className="py-3 px-4">Stored Suggestion / Value</th>
                       <th className="py-3 px-4 text-center">Usage Frequency</th>
-                      <th className="py-3 px-4">Master Linkage / Status</th>
                       <th className="py-3 px-4 text-right">Actions</th>
                     </tr>
                   </thead>
@@ -424,97 +439,36 @@ export default function AutoCompleteSuggestionsPage() {
                           )}
                         </td>
 
-                        <td className="py-3 px-4 whitespace-nowrap">
-                          <span
-                            className={cn(
-                              "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold",
-                              item.source.includes("CourierEntry")
-                                ? "bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-900/50"
-                                : item.source.includes("BillingParty")
-                                ? "bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200/60 dark:border-purple-900/50"
-                                : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400"
-                            )}
-                          >
-                            <Database className="h-2.5 w-2.5" />
-                            {item.source}
-                          </span>
-                        </td>
-
                         <td className="py-3 px-4 text-center whitespace-nowrap">
                           <span className="font-semibold text-xs text-slate-800 dark:text-slate-200">
-                            {item.count} {item.source.includes("BillingParty") ? "invoices" : "entries"}
-                          </span>
-                        </td>
-
-                        <td className="py-3 px-4">
-                          <span
-                            className={cn(
-                              "inline-flex items-center px-2.5 py-0.5 rounded-lg text-xs font-medium",
-                              item.linkageStatus === "Official Master Name"
-                                ? "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
-                                : item.linkageStatus.startsWith("Alias")
-                                ? "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800"
-                                : item.linkageStatus === "Unlinked booking name"
-                                ? "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
-                                : "bg-slate-50 dark:bg-slate-800/60 text-slate-600 dark:text-slate-400"
-                            )}
-                          >
-                            {item.linkageStatus}
+                            {item.count} {item.count === 1 ? "entry" : "entries"}
                           </span>
                         </td>
 
                         <td className="py-3 px-4 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1.5">
-                            {item.canRename ? (
-                              <>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleOpenRename(item.fieldKey, item.storedValue, item.type)}
-                                  className="h-7 rounded-lg text-[11px] font-semibold text-indigo-600 border-indigo-200/80 hover:bg-indigo-50 dark:border-indigo-900/60 dark:hover:bg-indigo-950/30"
-                                >
-                                  <Edit2 className="h-3 w-3 mr-1" />
-                                  Rename
-                                </Button>
-
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleOpenDelete(item)}
-                                  className="h-7 rounded-lg text-[11px] font-semibold text-rose-600 border-rose-200/80 hover:bg-rose-50 dark:border-rose-900/60 dark:text-rose-400 dark:hover:bg-rose-900/20"
-                                  title="Permanently remove from autocomplete suggestions"
-                                >
-                                  <Trash2 className="h-3 w-3 mr-1" />
-                                  Delete
-                                </Button>
-                              </>
-                            ) : item.fieldKey === "billingMaster" ? (
-                              <>
-                                <Link href="/dashboard/parties">
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-7 rounded-lg text-[11px] font-semibold text-purple-600 border-purple-200/80 hover:bg-purple-50 dark:border-purple-900/60 dark:hover:bg-purple-950/30"
-                                  >
-                                    <ExternalLink className="h-3 w-3 mr-1" />
-                                    Billing Party
-                                  </Button>
-                                </Link>
-
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleOpenDelete(item)}
-                                  className="h-7 rounded-lg text-[11px] font-semibold text-rose-600 border-rose-200/80 hover:bg-rose-50 dark:border-rose-900/60 dark:text-rose-400 dark:hover:bg-rose-900/20"
-                                  title="Delete or archive billing master"
-                                >
-                                  <Trash2 className="h-3 w-3 mr-1" />
-                                  Delete
-                                </Button>
-                              </>
-                            ) : (
-                              <span className="text-[11px] text-slate-400 italic">Built-in</span>
+                            {item.canRename && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleOpenRename(item.fieldKey, item.storedValue, item.type)}
+                                className="h-7 rounded-lg text-[11px] font-semibold text-indigo-600 border-indigo-200/80 hover:bg-indigo-50 dark:border-indigo-900/60 dark:hover:bg-indigo-950/30"
+                              >
+                                <Edit2 className="h-3 w-3 mr-1" />
+                                Rename
+                              </Button>
                             )}
+
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleOpenDelete(item)}
+                              className="h-7 rounded-lg text-[11px] font-semibold text-rose-600 border-rose-200/80 hover:bg-rose-50 dark:border-rose-900/60 dark:text-rose-400 dark:hover:bg-rose-900/20"
+                              title="Permanently remove from autocomplete suggestions"
+                            >
+                              <Trash2 className="h-3 w-3 mr-1" />
+                              Delete
+                            </Button>
                           </div>
                         </td>
                       </tr>

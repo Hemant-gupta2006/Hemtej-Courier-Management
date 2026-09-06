@@ -51,13 +51,13 @@ const baseRoutes = [
     color: "from-emerald-500 to-teal-500",
   },
   {
-    label: "Bill Register",
+    label: "Generated Bills",
     icon: List,
     href: "/dashboard/bills",
     color: "from-fuchsia-500 to-pink-500",
   },
   {
-    label: "Billing Parties",
+    label: "Party Invoice Profiles",
     icon: Building2,
     href: "/dashboard/parties",
     color: "from-purple-500 to-indigo-500",

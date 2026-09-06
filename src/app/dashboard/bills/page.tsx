@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { Loader2, Receipt, Search, RefreshCw, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
+import { Loader2, Receipt, Search, RefreshCw, ChevronLeft, ChevronRight, Trash2, Calendar } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +18,7 @@ interface Bill {
   sgst: number;
   igst: number;
   netAmount: number;
+  entriesCount?: number;
   party: {
     officialInvoiceName: string;
   } | null;
@@ -169,83 +170,166 @@ export default function BillRegisterPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-x-auto bg-white dark:bg-slate-950">
-            <table className="w-full text-sm text-left whitespace-nowrap">
-              <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 font-semibold border-b border-slate-200 dark:border-slate-800 uppercase tracking-wider text-[11px]">
-                <tr>
-                  <th className="px-4 py-4 rounded-tl-xl">Bill No</th>
-                  <th className="px-4 py-4">Date</th>
-                  <th className="px-4 py-4">Customer / Party</th>
-                  <th className="px-4 py-4 text-right">Gross Amt</th>
-                  <th className="px-4 py-4 text-right">CGST</th>
-                  <th className="px-4 py-4 text-right">SGST</th>
-                  <th className="px-4 py-4 text-right">Net Amount</th>
-                  <th className="px-4 py-4 text-center rounded-tr-xl">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {loading ? (
-                  <tr>
-                    <td colSpan={8} className="px-4 py-12 text-center text-slate-500">
-                      <Loader2 className="h-6 w-6 animate-spin mx-auto text-purple-500" />
-                    </td>
-                  </tr>
-                ) : bills.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="px-4 py-12 text-center text-slate-500">
-                      No bills found.
-                    </td>
-                  </tr>
-                ) : (
-                  bills.map((bill) => (
-                    <tr key={bill.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                      <td className="px-4 py-4 font-semibold text-slate-900 dark:text-slate-100">
-                        {bill.billNo || "-"}
-                      </td>
-                      <td className="px-4 py-4 text-slate-600 dark:text-slate-400">
+          {loading ? (
+            <div className="py-16 text-center text-slate-500">
+              <Loader2 className="h-8 w-8 animate-spin mx-auto text-purple-500 mb-2" />
+              <p className="text-xs font-medium">Loading bills...</p>
+            </div>
+          ) : bills.length === 0 ? (
+            <div className="py-16 text-center text-slate-500">
+              <Receipt className="h-10 w-10 mx-auto text-slate-300 dark:text-slate-700 mb-2" />
+              <p className="font-semibold text-base text-slate-700 dark:text-slate-300">No bills found</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {search ? `No bills match "${search}".` : "No bills have been generated yet."}
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Mobile View: Vertical Cards / Boxes */}
+              <div className="block md:hidden divide-y divide-slate-100 dark:divide-slate-800/80 space-y-3">
+                {bills.map((bill) => (
+                  <div
+                    key={`mobile-${bill.id}`}
+                    className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-3"
+                  >
+                    {/* Header: Bill No and Date */}
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-sm px-2.5 py-1 rounded-lg bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 font-mono">
+                        Bill #{bill.billNo || "-"}
+                      </span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                        <Calendar className="h-3.5 w-3.5" />
                         {new Date(bill.invoiceDate).toLocaleDateString("en-GB")}
-                      </td>
-                      <td className="px-4 py-4 font-medium text-slate-700 dark:text-slate-300">
+                      </span>
+                    </div>
+
+                    {/* Customer / Party */}
+                    <div>
+                      <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">Customer / Party</span>
+                      <p className="font-semibold text-sm text-slate-900 dark:text-slate-100 mt-0.5">
                         {bill.party?.officialInvoiceName || bill.billingPartyNames[0] || "Unknown"}
-                      </td>
-                      <td className="px-4 py-4 text-right font-medium">₹{bill.grossAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-                      <td className="px-4 py-4 text-right text-slate-500">₹{bill.cgst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-                      <td className="px-4 py-4 text-right text-slate-500">₹{bill.sgst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-                      <td className="px-4 py-4 text-right font-bold text-slate-900 dark:text-slate-100">₹{bill.netAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-                      <td className="px-4 py-4 text-center">
-                        <div className="flex items-center justify-center gap-2">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleRegenerate(bill.id)}
-                            disabled={regeneratingId === bill.id || isDeleting}
-                            className="h-8 rounded-lg text-purple-600 border-purple-200 hover:bg-purple-50 dark:border-purple-900 dark:hover:bg-purple-900/30"
-                          >
-                            {regeneratingId === bill.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
-                            ) : (
-                              <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                            )}
-                            Regenerate
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setDeletingBill(bill)}
-                            disabled={regeneratingId === bill.id || isDeleting}
-                            className="h-8 rounded-lg text-rose-600 border-rose-200 hover:bg-rose-50 dark:border-rose-900/50 dark:text-rose-400 dark:hover:bg-rose-900/20 hover:border-rose-300 transition-colors"
-                          >
-                            <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-                            Delete
-                          </Button>
-                        </div>
-                      </td>
+                      </p>
+                    </div>
+
+                    {/* Financial Summary */}
+                    <div className="grid grid-cols-2 gap-2 bg-slate-50 dark:bg-slate-800/40 p-3 rounded-xl text-xs">
+                      <div>
+                        <span className="text-slate-400 block text-[10px] uppercase font-semibold">Gross Amount</span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-300">
+                          ₹{bill.grossAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[10px] uppercase font-semibold">Taxes (CGST + SGST)</span>
+                        <span className="text-slate-600 dark:text-slate-400 font-medium">
+                          ₹{(bill.cgst + bill.sgst).toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                      <div className="col-span-2 pt-1.5 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between">
+                        <span className="font-bold text-slate-800 dark:text-slate-200">Net Amount</span>
+                        <span className="font-bold text-base text-purple-600 dark:text-purple-400">
+                          ₹{bill.netAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleRegenerate(bill.id)}
+                        disabled={regeneratingId === bill.id || isDeleting}
+                        className="flex-1 h-9 rounded-xl text-xs font-semibold text-purple-600 border-purple-200 hover:bg-purple-50 dark:border-purple-900 dark:hover:bg-purple-900/30"
+                      >
+                        {regeneratingId === bill.id ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                        ) : (
+                          <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                        )}
+                        Regenerate Bill
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setDeletingBill(bill)}
+                        disabled={regeneratingId === bill.id || isDeleting}
+                        className="h-9 px-3 rounded-xl text-xs text-rose-600 border-rose-200 hover:bg-rose-50 dark:border-rose-900/50 dark:text-rose-400 dark:hover:bg-rose-900/20"
+                      >
+                        <Trash2 className="h-3.5 w-3.5 mr-1" />
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop View: Table */}
+              <div className="hidden md:block rounded-xl border border-slate-200 dark:border-slate-800 overflow-x-auto bg-white dark:bg-slate-950">
+                <table className="w-full text-sm text-left whitespace-nowrap">
+                  <thead className="bg-slate-50 dark:bg-slate-900/50 text-slate-500 font-semibold border-b border-slate-200 dark:border-slate-800 uppercase tracking-wider text-[11px]">
+                    <tr>
+                      <th className="px-4 py-4 rounded-tl-xl">Bill No</th>
+                      <th className="px-4 py-4">Date</th>
+                      <th className="px-4 py-4">Customer / Party</th>
+                      <th className="px-4 py-4 text-right">Gross Amt</th>
+                      <th className="px-4 py-4 text-right">CGST</th>
+                      <th className="px-4 py-4 text-right">SGST</th>
+                      <th className="px-4 py-4 text-right">Net Amount</th>
+                      <th className="px-4 py-4 text-center rounded-tr-xl">Action</th>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {bills.map((bill) => (
+                      <tr key={bill.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
+                        <td className="px-4 py-4 font-semibold text-slate-900 dark:text-slate-100">
+                          {bill.billNo || "-"}
+                        </td>
+                        <td className="px-4 py-4 text-slate-600 dark:text-slate-400">
+                          {new Date(bill.invoiceDate).toLocaleDateString("en-GB")}
+                        </td>
+                        <td className="px-4 py-4 font-medium text-slate-700 dark:text-slate-300">
+                          {bill.party?.officialInvoiceName || bill.billingPartyNames[0] || "Unknown"}
+                        </td>
+                        <td className="px-4 py-4 text-right font-medium">₹{bill.grossAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                        <td className="px-4 py-4 text-right text-slate-500">₹{bill.cgst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                        <td className="px-4 py-4 text-right text-slate-500">₹{bill.sgst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                        <td className="px-4 py-4 text-right font-bold text-slate-900 dark:text-slate-100">₹{bill.netAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+                        <td className="px-4 py-4 text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleRegenerate(bill.id)}
+                              disabled={regeneratingId === bill.id || isDeleting}
+                              className="h-8 rounded-lg text-purple-600 border-purple-200 hover:bg-purple-50 dark:border-purple-900 dark:hover:bg-purple-900/30"
+                            >
+                              {regeneratingId === bill.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                              ) : (
+                                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                              )}
+                              Regenerate
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setDeletingBill(bill)}
+                              disabled={regeneratingId === bill.id || isDeleting}
+                              className="h-8 rounded-lg text-rose-600 border-rose-200 hover:bg-rose-50 dark:border-rose-900/50 dark:text-rose-400 dark:hover:bg-rose-900/20 hover:border-rose-300 transition-colors"
+                            >
+                              <Trash2 className="h-3.5 w-3.5 mr-1" />
+                              Delete
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
 
           {/* Pagination */}
           {totalPages > 1 && (

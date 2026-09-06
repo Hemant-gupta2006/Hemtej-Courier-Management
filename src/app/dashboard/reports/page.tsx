@@ -667,7 +667,7 @@ export default function ReportsPage() {
             <div className="pt-2 space-y-3">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-semibold flex items-center gap-2 text-slate-700 dark:text-slate-300">
-                  Select Billing Party (Master)
+                  Select Party Invoice Profile (Master)
                 </label>
                 <Button variant="ghost" size="sm" onClick={() => { setSelectedParty(null); setIsModalOpen(true); }} className="h-8 px-2 text-purple-600 hover:text-purple-700 hover:bg-purple-50 dark:hover:bg-purple-900/20">
                   <Plus className="h-4 w-4 mr-1" /> Add New

@@ -172,10 +172,10 @@ export default function BillingPartiesPage() {
         <div>
           <h2 className="text-3xl font-bold tracking-tight bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent flex items-center gap-2.5">
             <Building2 className="h-8 w-8 text-purple-600 inline-block" />
-            Billing Party Master
+            Party Invoice Profiles
           </h2>
           <p className="text-muted-foreground mt-1 text-sm">
-            Manage official registered invoice recipients and booking aliases directly in the database
+            Manage party invoicing details, GST credentials, billing addresses, and aliases for GST bill generation
           </p>
         </div>
 
@@ -196,7 +196,7 @@ export default function BillingPartiesPage() {
             className="rounded-xl h-10 px-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold shadow-md shadow-purple-500/20"
           >
             <Plus className="h-4 w-4 mr-1.5" />
-            Add New Party
+            Add Invoicing Profile
           </Button>
         </div>
       </div>
@@ -207,13 +207,13 @@ export default function BillingPartiesPage() {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <CardTitle className="text-xl flex items-center gap-2">
-                Parties Directory
+                Invoicing Profiles Directory
                 <span className="text-xs font-normal text-muted-foreground px-2 py-0.5 rounded-full bg-purple-100/70 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300">
                   {pagination.total} registered
                 </span>
               </CardTitle>
               <CardDescription className="text-xs mt-1">
-                Official billing recipients used when generating GST invoices and booking reports.
+                Party invoice details and GST credentials used for GST bill generation.
               </CardDescription>
             </div>
 
@@ -243,21 +243,128 @@ export default function BillingPartiesPage() {
           {isLoading ? (
             <div className="py-24 flex flex-col items-center justify-center text-slate-400 gap-3">
               <Loader2 className="h-8 w-8 animate-spin text-purple-500" />
-              <span className="text-xs font-medium">Loading billing parties from database...</span>
+              <span className="text-xs font-medium">Loading invoicing profiles from database...</span>
             </div>
           ) : parties.length === 0 ? (
             <div className="py-20 text-center text-slate-400">
               <Building2 className="h-12 w-12 mx-auto text-slate-300 dark:text-slate-700 mb-3" />
-              <p className="font-semibold text-base text-slate-700 dark:text-slate-300">No billing parties found</p>
+              <p className="font-semibold text-base text-slate-700 dark:text-slate-300">No invoicing profiles found</p>
               <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
                 {debouncedSearch
-                  ? `No parties match "${debouncedSearch}". Try a different keyword or clear search.`
-                  : "Click 'Add New Party' above to create your first billing master record."}
+                  ? `No profiles match "${debouncedSearch}". Try a different keyword or clear search.`
+                  : "Click 'Add Invoicing Profile' above to create your first party profile."}
               </p>
             </div>
           ) : (
             <>
-              <div className="overflow-x-auto">
+              {/* Mobile View: Vertical Cards / Boxes */}
+              <div className="block md:hidden divide-y divide-slate-100 dark:divide-slate-800/80 p-3 space-y-3">
+                {parties.map((party) => (
+                  <div
+                    key={`mobile-${party.id}`}
+                    className="p-4 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm space-y-3"
+                  >
+                    {/* Header: Name and status badge */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h4 className="font-bold text-base text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
+                          {party.officialInvoiceName}
+                        </h4>
+                        <span className="text-[11px] text-muted-foreground font-mono">
+                          ID: {party.id.slice(-6)}
+                        </span>
+                      </div>
+                      {party.isArchived ? (
+                        <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-500 shrink-0">
+                          Archived
+                        </span>
+                      ) : (
+                        <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 shrink-0">
+                          Active
+                        </span>
+                      )}
+                    </div>
+
+                    {/* GST & Invoices Count */}
+                    <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-100 dark:border-slate-800/60 text-xs">
+                      <div>
+                        <span className="text-slate-400 block text-[10px] uppercase font-semibold">GST Number</span>
+                        {party.gstNumber ? (
+                          <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">
+                            {party.gstNumber}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 italic">Unregistered</span>
+                        )}
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block text-[10px] uppercase font-semibold">Invoices Generated</span>
+                        <span className="font-bold text-slate-800 dark:text-slate-200">
+                          {party._count?.invoices || 0} bills
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Booking Aliases */}
+                    {party.aliases && party.aliases.length > 0 && (
+                      <div className="space-y-1">
+                        <span className="text-slate-400 block text-[10px] uppercase font-semibold">Booking Aliases</span>
+                        <div className="flex flex-wrap gap-1">
+                          {party.aliases.map((alias, i) => (
+                            <span
+                              key={i}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200/50 dark:border-purple-800/40"
+                            >
+                              <Tag className="h-2.5 w-2.5 opacity-70" />
+                              {alias}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Address & Contact */}
+                    {(party.addressLine1 || party.city || party.contactNumber) && (
+                      <div className="text-xs text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/40 p-2.5 rounded-xl space-y-0.5">
+                        {party.addressLine1 && <p>{party.addressLine1}</p>}
+                        {(party.city || party.state || party.pincode) && (
+                          <p className="text-[11px]">
+                            {[party.city, party.state, party.pincode].filter(Boolean).join(", ")}
+                          </p>
+                        )}
+                        {party.contactNumber && (
+                          <p className="text-[11px] text-slate-500 font-mono mt-1">📞 {party.contactNumber}</p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Action Buttons */}
+                    <div className="flex items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800/60">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleOpenEdit(party)}
+                        className="flex-1 h-8 rounded-xl text-xs font-semibold text-purple-600 border-purple-200/80 hover:bg-purple-50 dark:border-purple-900/60 dark:hover:bg-purple-900/30"
+                      >
+                        <Edit2 className="h-3.5 w-3.5 mr-1" />
+                        Edit
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setDeletingParty(party)}
+                        className="h-8 px-3 rounded-xl text-xs text-rose-600 border-rose-200/80 hover:bg-rose-50 dark:border-rose-900/60 dark:text-rose-400 dark:hover:bg-rose-900/20"
+                      >
+                        <Trash2 className="h-3.5 w-3.5 mr-1" />
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop View: Table */}
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-left text-sm border-collapse">
                   <thead>
                     <tr className="border-y border-slate-200/80 dark:border-slate-800/80 bg-slate-50/75 dark:bg-slate-900/50 text-[11px] font-bold uppercase tracking-wider text-slate-500">
@@ -385,7 +492,7 @@ export default function BillingPartiesPage() {
                 <div className="text-slate-500 dark:text-slate-400">
                   Showing <span className="font-semibold text-slate-800 dark:text-slate-200">{startRecord}</span> to{" "}
                   <span className="font-semibold text-slate-800 dark:text-slate-200">{endRecord}</span> of{" "}
-                  <span className="font-semibold text-slate-800 dark:text-slate-200">{pagination.total}</span> parties
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">{pagination.total}</span> profiles
                 </div>
 
                 <div className="flex items-center gap-3 self-end sm:self-auto">
@@ -458,9 +565,9 @@ export default function BillingPartiesPage() {
                 <Trash2 className="h-5 w-5" />
               </div>
               <div>
-                <DialogTitle className="text-lg">Delete Billing Party</DialogTitle>
+                <DialogTitle className="text-lg">Delete Invoicing Profile</DialogTitle>
                 <DialogDescription className="text-xs mt-0.5">
-                  Confirm deletion or archival of this billing master.
+                  Confirm deletion or archival of this party invoice profile.
                 </DialogDescription>
               </div>
             </div>

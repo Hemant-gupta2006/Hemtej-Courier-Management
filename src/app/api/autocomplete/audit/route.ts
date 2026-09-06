@@ -213,68 +213,6 @@ export async function GET(req: Request) {
               WHERE action = 'EXCLUDED_SUGGESTION' AND "oldValue" = ${userId} AND entity IN ('destination', 'all')
             )
           GROUP BY "destination"
-
-          UNION ALL
-
-          -- 4. billingMaster
-          SELECT 
-            'Billing Master Party' AS type,
-            'billingMaster' AS "fieldKey",
-            bp."officialInvoiceName" AS "storedValue",
-            'Database (BillingParty)' AS source,
-            COUNT(i.id)::int AS count,
-            false AS "canRename",
-            bp.id AS "partyId",
-            bp.aliases AS aliases,
-            CASE WHEN bp."isArchived" THEN 'Archived Master' ELSE 'Active Master' END AS "linkageStatus"
-          FROM "BillingParty" bp
-          LEFT JOIN "Invoice" i ON i."partyId" = bp.id
-          WHERE bp."userId" = ${userId}
-            ${search ? Prisma.sql`AND (bp."officialInvoiceName" ILIKE ${searchPattern} OR array_to_string(bp.aliases, ',') ILIKE ${searchPattern})` : Prisma.empty}
-          GROUP BY bp.id, bp."officialInvoiceName", bp.aliases, bp."isArchived"
-
-          UNION ALL
-
-          -- 5. system constants
-          SELECT 
-            'Transit Mode' AS type,
-            'system' AS "fieldKey",
-            'Surface, Air, Cargo, V Fast' AS "storedValue",
-            'System Constants' AS source,
-            4 AS count,
-            false AS "canRename",
-            NULL::text AS "partyId",
-            NULL::text[] AS aliases,
-            'Built-in application options' AS "linkageStatus"
-          WHERE 'Surface, Air, Cargo, V Fast' ILIKE ${searchPattern} OR 'Transit Mode' ILIKE ${searchPattern}
-
-          UNION ALL
-
-          SELECT 
-            'Weight Unit' AS type,
-            'system' AS "fieldKey",
-            'gm, kg' AS "storedValue",
-            'System Constants' AS source,
-            2 AS count,
-            false AS "canRename",
-            NULL::text AS "partyId",
-            NULL::text[] AS aliases,
-            'Built-in measurement units' AS "linkageStatus"
-          WHERE 'gm, kg' ILIKE ${searchPattern} OR 'Weight Unit' ILIKE ${searchPattern}
-
-          UNION ALL
-
-          SELECT 
-            'Entry Status' AS type,
-            'system' AS "fieldKey",
-            'Cash, Account, Pending, Delivered' AS "storedValue",
-            'System Defaults' AS source,
-            4 AS count,
-            false AS "canRename",
-            NULL::text AS "partyId",
-            NULL::text[] AS aliases,
-            'Courier status workflow' AS "linkageStatus"
-          WHERE 'Cash, Account, Pending, Delivered' ILIKE ${searchPattern} OR 'Entry Status' ILIKE ${searchPattern}
         ),
         counted AS (
           SELECT *, COUNT(*) OVER()::int AS "fullCount" FROM combined

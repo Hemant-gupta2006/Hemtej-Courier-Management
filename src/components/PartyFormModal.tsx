@@ -96,10 +96,10 @@ export function PartyFormModal({ isOpen, onClose, onSave, initialData }: PartyFo
       <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800">
         <DialogHeader>
           <DialogTitle className="text-xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-            {initialData ? "Edit Billing Party" : "Add New Billing Party"}
+            {initialData ? "Edit Party Invoice Profile" : "Add Party Invoice Profile"}
           </DialogTitle>
           <DialogDescription>
-            {initialData ? "Update the master details for this party." : "Create a new party for billing."}
+            {initialData ? "Update the invoice details and GST credentials for this party." : "Create an invoice profile with GST and billing details."}
           </DialogDescription>
         </DialogHeader>
         
@@ -213,7 +213,7 @@ export function PartyFormModal({ isOpen, onClose, onSave, initialData }: PartyFo
             </Button>
             <Button type="submit" disabled={isLoading} className="rounded-xl bg-purple-600 hover:bg-purple-700 text-white">
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {initialData ? "Save Changes" : "Create Party"}
+              {initialData ? "Save Changes" : "Save Profile"}
             </Button>
           </DialogFooter>
         </form>
