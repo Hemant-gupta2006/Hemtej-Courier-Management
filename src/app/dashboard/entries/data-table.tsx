@@ -28,13 +28,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CourierEntry } from "@prisma/client";
-import { PlusCircle, Download, Upload, Settings2, RefreshCw, Search, X, Calendar } from "lucide-react";
+import { PlusCircle, Download, Upload, Settings2, RefreshCw, Search, X, Calendar, SlidersHorizontal, ArrowUpDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import * as XLSX from "xlsx";
 import { useRegisters } from "@/context/RegisterContext";
 import { getAutocompleteData, clearAutocompleteCache } from "@/lib/autocomplete";
 import { ImportPreviewModal, PreviewData } from "@/components/ImportPreviewModal";
+import { RegisterFilterPopover, RegisterFilters, DEFAULT_REGISTER_FILTERS, FilterOptions } from "@/components/RegisterFilterPopover";
 
 interface BatchDefaults {
   date: string;
@@ -56,11 +57,20 @@ interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
   totalCount?: number;
+  filteredCount?: number;
   pageIndex?: number;
   pageSize?: number;
+  totalPages?: number;
+  onPageChange?: (page: number) => void;
   mode?: "entry" | "all";
   searchValue?: string;
   onSearchChange?: (val: string) => void;
+  filters?: RegisterFilters;
+  onFiltersChange?: (filters: RegisterFilters) => void;
+  filterOptions?: FilterOptions;
+  activeFilterCount?: number;
+  currentSort?: { column: string; direction: "asc" | "desc" | null };
+  onToggleSort?: (columnId: string) => void;
   startDate?: string;
   onStartDateChange?: (val: string) => void;
   endDate?: string;
@@ -75,6 +85,8 @@ interface DataTableProps<TData, TValue> {
   onClearAll?: () => void;
   onExportExcel?: () => void;
   activeRegister?: any;
+  onEntrySaved?: (savedEntry: any, isEdit: boolean) => void;
+  onEntryDeleted?: (deletedId: string) => void;
 }
 
 interface LocalRow {
@@ -174,11 +186,20 @@ export function DataTable<TData, TValue>({
   columns,
   data: initialData,
   totalCount = 0,
+  filteredCount,
   pageIndex = 0,
   pageSize = 50,
+  totalPages = 1,
+  onPageChange,
   mode = "entry",
   searchValue = "",
   onSearchChange,
+  filters,
+  onFiltersChange,
+  filterOptions,
+  activeFilterCount = 0,
+  currentSort,
+  onToggleSort,
   startDate = "",
   onStartDateChange,
   endDate = "",
@@ -192,6 +213,8 @@ export function DataTable<TData, TValue>({
   onClearAll,
   onExportExcel,
   activeRegister,
+  onEntrySaved,
+  onEntryDeleted,
 }: DataTableProps<TData, TValue>) {
   const [data, setData] = useState<LocalRow[]>([]);
   const { refreshRegisters } = useRegisters();
@@ -322,7 +345,11 @@ export function DataTable<TData, TValue>({
   }, [activeRegister]);
 
   useEffect(() => {
-    setData(initialData as unknown as LocalRow[]);
+    const unsavedNewRows = dataRef.current.filter((r) => r.isNew);
+    const serverRows = (initialData || []) as unknown as LocalRow[];
+    const unsavedIds = new Set(unsavedNewRows.map((r) => r.tempId || r.id));
+    const merged = [...unsavedNewRows, ...serverRows.filter((r) => !unsavedIds.has(r.id))];
+    setData(merged);
   }, [initialData]);
 
   useEffect(() => {
@@ -465,6 +492,7 @@ export function DataTable<TData, TValue>({
         clearAllRowErrors(identifier);
         toast.success("Courier entry deleted");
         refreshRegisters();
+        onEntryDeleted?.(id);
       } else {
         const err = await res.json();
         toast.error(err.error || "Failed to delete entry");
@@ -472,7 +500,7 @@ export function DataTable<TData, TValue>({
     } catch (e) {
       toast.error("Network error while deleting entry");
     }
-  }, [clearAllRowErrors, activeRegister]);
+  }, [clearAllRowErrors, activeRegister, onEntryDeleted, refreshRegisters]);
 
   const validateRow = useCallback((row: LocalRow): Record<string, string> => {
     const errs: Record<string, string> = {};
@@ -661,6 +689,7 @@ export function DataTable<TData, TValue>({
             refreshRegisters();
             learnAutocompleteValues(payload.fromParty, payload.toParty, payload.destination);
             clearAutocompleteCache();
+            onEntrySaved?.(saved, false);
             
             // Update cached next challan
             nextChallanRef.current = Number(saved.challanNo) + 1;
@@ -716,7 +745,7 @@ export function DataTable<TData, TValue>({
 
       return { success: true, nextTempId };
     },
-    [validateRow, activeRegister, getNextChallan, useBatchDefaults, batchDefaults, refreshRegisters, learnAutocompleteValues]
+    [validateRow, activeRegister, getNextChallan, useBatchDefaults, batchDefaults, refreshRegisters, learnAutocompleteValues, onEntrySaved]
   );
 
   const saveEditedRow = useCallback(
@@ -778,6 +807,7 @@ export function DataTable<TData, TValue>({
             toast.success("Courier entry updated!");
             refreshRegisters();
             learnAutocompleteValues(targetRow.fromParty, targetRow.toParty, targetRow.destination);
+            onEntrySaved?.({ ...targetRow, ...payload }, true);
           } else {
             // Revert on error
             dataRef.current = previousData;
@@ -807,7 +837,7 @@ export function DataTable<TData, TValue>({
 
       return true;
     },
-    [validateRow, clearAllRowErrors, triggerRowErrorUpdate, activeRegister, refreshRegisters, learnAutocompleteValues]
+    [validateRow, clearAllRowErrors, triggerRowErrorUpdate, activeRegister, refreshRegisters, learnAutocompleteValues, onEntrySaved]
   );
 
   const handleCellKeyDown = useCallback(
@@ -1137,6 +1167,8 @@ export function DataTable<TData, TValue>({
       pageSize,
       localRowOffset,
       activeRegister,
+      currentSort,
+      onToggleSort,
       filterProps: mode === "all" ? {
         startDate,
         onStartDateChange: onStartDateChange || (() => { }),
@@ -1168,6 +1200,8 @@ export function DataTable<TData, TValue>({
       pageSize,
       localRowOffset,
       activeRegister,
+      currentSort,
+      onToggleSort,
       startDate,
       onStartDateChange,
       endDate,
@@ -1218,66 +1252,177 @@ export function DataTable<TData, TValue>({
 
   return (
     <div className="w-full space-y-1.5">
-      {/* Entry mode: Single consolidated card containing Default Date, Export Excel, and Add Courier */}
+      {/* Entry mode: Single consolidated card containing Default Date, Search, Filters, Import, Export, and Add Courier */}
       {mode !== "all" && (
-        <div className="rounded-[14px] bg-white/40 dark:bg-slate-900/40 backdrop-blur-3xl border border-white/50 dark:border-white/10 shadow-sm px-3 py-1.5 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
-              <Calendar className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-              <span className="text-sm font-semibold text-slate-800 dark:text-white whitespace-nowrap">
-                Default Date:
-              </span>
+        <div className="space-y-2">
+          <div className="rounded-[14px] bg-white/40 dark:bg-slate-900/40 backdrop-blur-3xl border border-white/50 dark:border-white/10 shadow-sm px-3 py-1.5 flex flex-wrap items-center justify-between gap-2.5">
+            {/* Left section: Default Date, Search, Filters */}
+            <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[280px]">
+              {/* Default Date */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <Calendar className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                <span className="text-xs font-semibold text-slate-800 dark:text-white whitespace-nowrap">
+                  Default:
+                </span>
+                <Input
+                  type="date"
+                  disabled={isReadOnly}
+                  value={batchDefaults.date}
+                  onChange={(e) => setBatchDefaults({ ...batchDefaults, date: e.target.value })}
+                  className="bg-white/50 dark:bg-slate-800/50 border-white/30 dark:border-white/10 h-8 w-36 text-xs focus-visible:ring-1 focus-visible:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  {...minMaxProps}
+                />
+              </div>
+
+              <div className="h-4 w-[1px] bg-slate-200 dark:bg-slate-800 hidden md:block" />
+
+              {/* Search Input */}
+              <div className="relative flex-1 min-w-[150px] max-w-xs">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+                <Input
+                  type="text"
+                  placeholder="Search current register..."
+                  value={searchValue}
+                  onChange={(e) => onSearchChange?.(e.target.value)}
+                  className="pl-8 pr-7 h-8 bg-white/50 dark:bg-slate-800/50 border-white/30 dark:border-white/10 rounded-xl text-xs text-slate-100 placeholder:text-slate-400 focus-visible:ring-1 focus-visible:ring-blue-500 shadow-sm"
+                />
+                {searchValue && (
+                  <button
+                    onClick={() => onSearchChange?.("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-0.5"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </div>
+
+              {/* Filters Button */}
+              {filters && onFiltersChange && filterOptions && (
+                <RegisterFilterPopover
+                  filters={filters}
+                  onChange={onFiltersChange}
+                  options={filterOptions}
+                  activeCount={activeFilterCount || 0}
+                />
+              )}
             </div>
-            <Input
-              type="date"
-              disabled={isReadOnly}
-              value={batchDefaults.date}
-              onChange={(e) => setBatchDefaults({ ...batchDefaults, date: e.target.value })}
-              className="bg-white/50 dark:bg-slate-800/50 border-white/30 dark:border-white/10 h-9 w-40 text-sm focus-visible:ring-1 focus-visible:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
-              {...minMaxProps}
-            />
+
+            {/* Right section: Import, Export, Add Courier */}
+            <div className="flex items-center gap-2 ml-auto shrink-0">
+              <input
+                type="file"
+                ref={fileInputRef}
+                accept=".xlsx, .xls"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+              <Button
+                onClick={() => fileInputRef.current?.click()}
+                variant="outline"
+                disabled={isReadOnly}
+                className="h-8 rounded-xl bg-white/10 dark:bg-slate-900/50 backdrop-blur-xl border border-white/20 dark:border-white/10 hover:bg-white/20 text-xs font-medium shadow-sm px-2.5"
+              >
+                <Upload className="h-3.5 w-3.5 sm:mr-1.5" />
+                <span className="hidden sm:inline">Import</span>
+              </Button>
+              <Button
+                onClick={onExportExcel || exportExcel}
+                variant="outline"
+                className="h-8 rounded-xl bg-white/10 dark:bg-slate-900/50 backdrop-blur-xl border border-white/20 dark:border-white/10 hover:bg-white/20 text-xs font-medium shadow-sm px-2.5"
+                title="Export current filtered & sorted register entries"
+              >
+                <Download className="h-3.5 w-3.5 sm:mr-1.5" />
+                <span className="hidden sm:inline">Export</span>
+              </Button>
+              <Button
+                disabled={isReadOnly}
+                onClick={async () => {
+                  const tempId = await addEmptyRow();
+                  if (tempId) {
+                    setTimeout(() => {
+                      document.getElementById(`cell-${tempId}-fromParty`)?.focus();
+                    }, 50);
+                  }
+                }}
+                className="h-8 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 shadow-md shadow-blue-500/25 text-white font-semibold text-xs px-3 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <PlusCircle className="mr-1.5 h-3.5 w-3.5" /> Add Courier
+              </Button>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 ml-auto">
-            <input
-              type="file"
-              ref={fileInputRef}
-              accept=".xlsx, .xls"
-              onChange={handleFileUpload}
-              className="hidden"
-            />
-            <Button
-              onClick={() => fileInputRef.current?.click()}
-              variant="outline"
-              disabled={isReadOnly}
-              className="h-9 rounded-xl bg-white/10 dark:bg-slate-900/50 backdrop-blur-xl border border-white/20 dark:border-white/10 hover:bg-white/20 text-sm font-medium shadow-sm px-3"
-            >
-              <Upload className="h-4 w-4 sm:mr-2" />
-              <span className="hidden sm:inline">Import</span>
-            </Button>
-            <Button
-              onClick={onExportExcel || exportExcel}
-              variant="outline"
-              className="h-9 rounded-xl bg-white/10 dark:bg-slate-900/50 backdrop-blur-xl border border-white/20 dark:border-white/10 hover:bg-white/20 text-sm font-medium shadow-sm px-3"
-            >
-              <Download className="h-4 w-4 sm:mr-2" />
-              <span className="hidden sm:inline">Export</span>
-            </Button>
-            <Button
-              disabled={isReadOnly}
-              onClick={async () => {
-                const tempId = await addEmptyRow();
-                if (tempId) {
-                  setTimeout(() => {
-                    document.getElementById(`cell-${tempId}-fromParty`)?.focus();
-                  }, 50);
-                }
-              }}
-              className="h-9 rounded-xl bg-gradient-to-r from-blue-600 to-purple-600 shadow-lg shadow-blue-500/25 text-white font-semibold text-sm px-3 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <PlusCircle className="mr-2 h-4 w-4" /> Add Courier
-            </Button>
-          </div>
+          {/* Active Filter Chips */}
+          {((activeFilterCount && activeFilterCount > 0) || Boolean(searchValue?.trim())) && filters && onFiltersChange && (
+            <div className="flex flex-wrap items-center gap-1.5 px-3 py-1.5 bg-slate-900/60 rounded-xl border border-white/10 text-xs">
+              <span className="text-[11px] font-semibold text-slate-400 mr-1">Active Filters:</span>
+
+              {searchValue?.trim() && (
+                <div className="flex items-center gap-1 px-2.5 py-0.5 bg-blue-500/15 border border-blue-500/30 text-blue-300 rounded-full text-[11px] font-medium">
+                  <span>Search: "{searchValue}"</span>
+                  <button onClick={() => onSearchChange?.("")} className="hover:text-white p-0.5"><X className="w-3 h-3" /></button>
+                </div>
+              )}
+
+              {filters.dateType === "exact" && filters.exactDate && (
+                <div className="flex items-center gap-1 px-2.5 py-0.5 bg-blue-500/15 border border-blue-500/30 text-blue-300 rounded-full text-[11px] font-medium">
+                  <span>Date: {filters.exactDate}</span>
+                  <button onClick={() => onFiltersChange({ ...filters, dateType: "all", exactDate: "" })} className="hover:text-white p-0.5"><X className="w-3 h-3" /></button>
+                </div>
+              )}
+
+              {filters.dateType === "range" && (filters.startDate || filters.endDate) && (
+                <div className="flex items-center gap-1 px-2.5 py-0.5 bg-blue-500/15 border border-blue-500/30 text-blue-300 rounded-full text-[11px] font-medium">
+                  <span>Date: {filters.startDate || "Start"} to {filters.endDate || "End"}</span>
+                  <button onClick={() => onFiltersChange({ ...filters, dateType: "all", startDate: "", endDate: "" })} className="hover:text-white p-0.5"><X className="w-3 h-3" /></button>
+                </div>
+              )}
+
+              {filters.fromParties.map((p) => (
+                <div key={`from-${p}`} className="flex items-center gap-1 px-2.5 py-0.5 bg-purple-500/15 border border-purple-500/30 text-purple-300 rounded-full text-[11px] font-medium">
+                  <span>From: {p}</span>
+                  <button onClick={() => onFiltersChange({ ...filters, fromParties: filters.fromParties.filter(i => i !== p) })} className="hover:text-white p-0.5"><X className="w-3 h-3" /></button>
+                </div>
+              ))}
+
+              {filters.toParties.map((p) => (
+                <div key={`to-${p}`} className="flex items-center gap-1 px-2.5 py-0.5 bg-purple-500/15 border border-purple-500/30 text-purple-300 rounded-full text-[11px] font-medium">
+                  <span>To: {p}</span>
+                  <button onClick={() => onFiltersChange({ ...filters, toParties: filters.toParties.filter(i => i !== p) })} className="hover:text-white p-0.5"><X className="w-3 h-3" /></button>
+                </div>
+              ))}
+
+              {filters.destinations.map((d) => (
+                <div key={`dest-${d}`} className="flex items-center gap-1 px-2.5 py-0.5 bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 rounded-full text-[11px] font-medium">
+                  <span>Dest: {d}</span>
+                  <button onClick={() => onFiltersChange({ ...filters, destinations: filters.destinations.filter(i => i !== d) })} className="hover:text-white p-0.5"><X className="w-3 h-3" /></button>
+                </div>
+              ))}
+
+              {filters.statuses.map((s) => (
+                <div key={`st-${s}`} className="flex items-center gap-1 px-2.5 py-0.5 bg-amber-500/15 border border-amber-500/30 text-amber-300 rounded-full text-[11px] font-medium">
+                  <span>Status: {s}</span>
+                  <button onClick={() => onFiltersChange({ ...filters, statuses: filters.statuses.filter(i => i !== s) })} className="hover:text-white p-0.5"><X className="w-3 h-3" /></button>
+                </div>
+              ))}
+
+              {filters.modes.map((m) => (
+                <div key={`mode-${m}`} className="flex items-center gap-1 px-2.5 py-0.5 bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 rounded-full text-[11px] font-medium">
+                  <span>Mode: {m}</span>
+                  <button onClick={() => onFiltersChange({ ...filters, modes: filters.modes.filter(i => i !== m) })} className="hover:text-white p-0.5"><X className="w-3 h-3" /></button>
+                </div>
+              ))}
+
+              <button
+                onClick={() => {
+                  onSearchChange?.("");
+                  onFiltersChange(DEFAULT_REGISTER_FILTERS);
+                }}
+                className="text-[11px] font-semibold text-red-400 hover:text-red-300 hover:underline px-2 py-0.5 transition-colors ml-auto"
+              >
+                Clear Filters
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1424,6 +1569,76 @@ export function DataTable<TData, TValue>({
           </Table>
         </div>
       </div>
+
+      {/* Pagination Footer */}
+      {onPageChange && (
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 bg-white/40 dark:bg-slate-900/40 backdrop-blur-xl border border-white/50 dark:border-white/10 rounded-2xl text-xs text-slate-600 dark:text-slate-400 shadow-sm mt-3 shrink-0">
+          <div className="flex items-center gap-2">
+            {filteredCount !== undefined && totalCount !== undefined && filteredCount !== totalCount ? (
+              <span>
+                Showing{" "}
+                <strong className="font-semibold text-slate-800 dark:text-slate-200">
+                  {filteredCount === 0 ? 0 : pageIndex * pageSize + 1}
+                </strong>
+                –
+                <strong className="font-semibold text-slate-800 dark:text-slate-200">
+                  {Math.min((pageIndex + 1) * pageSize, filteredCount)}
+                </strong>{" "}
+                of{" "}
+                <strong className="font-semibold text-blue-600 dark:text-blue-400">
+                  {filteredCount}
+                </strong>{" "}
+                entries{" "}
+                <span className="text-slate-400">
+                  (filtered from {totalCount} total)
+                </span>
+              </span>
+            ) : (
+              <span>
+                Showing{" "}
+                <strong className="font-semibold text-slate-800 dark:text-slate-200">
+                  {(filteredCount ?? totalCount) === 0 ? 0 : pageIndex * pageSize + 1}
+                </strong>
+                –
+                <strong className="font-semibold text-slate-800 dark:text-slate-200">
+                  {Math.min((pageIndex + 1) * pageSize, filteredCount ?? totalCount)}
+                </strong>{" "}
+                of{" "}
+                <strong className="font-semibold text-slate-800 dark:text-slate-200">
+                  {filteredCount ?? totalCount}
+                </strong>{" "}
+                entries
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pageIndex <= 0}
+              onClick={() => onPageChange(pageIndex)}
+              className="h-7 px-2.5 rounded-lg border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 gap-1 text-xs"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              <span>Previous</span>
+            </Button>
+            <span className="px-2 font-medium text-slate-700 dark:text-slate-300">
+              Page <strong>{pageIndex + 1}</strong> of <strong>{Math.max(1, totalPages)}</strong>
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={pageIndex + 1 >= totalPages}
+              onClick={() => onPageChange(pageIndex + 2)}
+              className="h-7 px-2.5 rounded-lg border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 gap-1 text-xs"
+            >
+              <span>Next</span>
+              <ChevronRight className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       <ImportPreviewModal
         isOpen={isImportModalOpen}

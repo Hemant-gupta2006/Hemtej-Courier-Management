@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import { useState, useEffect, useRef, useMemo } from "react";
 import { CourierEntry } from "@prisma/client";
-import { Trash2, Save, Filter } from "lucide-react";
+import { Trash2, Save, Filter, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
@@ -33,6 +33,8 @@ declare module "@tanstack/react-table" {
     clearFieldError?: (identifier: string, columnId: string) => void;
     mode?: "entry" | "all";
     activeRegister?: any;
+    currentSort?: { column: string; direction: "asc" | "desc" | null };
+    onToggleSort?: (columnId: string) => void;
     filterProps?: {
       startDate: string;
       onStartDateChange: (val: string) => void;
@@ -400,26 +402,59 @@ const WeightCell = ({ getValue, row, column, table }: any) => {
 };
 
 // ───────────────────────────────────────────
+// Sortable column header component
+// ───────────────────────────────────────────
+export const SortableHeader = ({
+  title,
+  columnId,
+  table,
+}: {
+  title: string;
+  columnId: string;
+  table: any;
+}) => {
+  const currentSort = table.options.meta?.currentSort;
+  const onToggleSort = table.options.meta?.onToggleSort;
+  const isSorted = currentSort?.column === columnId;
+  const direction = isSorted ? currentSort?.direction : null;
+
+  return (
+    <div
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggleSort?.(columnId);
+      }}
+      className="flex items-center gap-1 cursor-pointer select-none group/hdr py-1 hover:text-white transition-colors"
+      title={`Click to sort by ${title}`}
+    >
+      <span className="truncate">{title}</span>
+      <span className="shrink-0 flex items-center">
+        {direction === "asc" ? (
+          <ArrowUp className="w-3.5 h-3.5 text-blue-400 font-bold" />
+        ) : direction === "desc" ? (
+          <ArrowDown className="w-3.5 h-3.5 text-blue-400 font-bold" />
+        ) : (
+          <ArrowUpDown className="w-3 h-3 text-slate-500 opacity-0 group-hover/hdr:opacity-100 transition-opacity" />
+        )}
+      </span>
+    </div>
+  );
+};
+
+// ───────────────────────────────────────────
 // Column definitions
 // ───────────────────────────────────────────
 export const columns: ColumnDef<CourierEntry>[] = [
   {
     accessorKey: "srNo",
-    header: "Sr.No",
-    size: 45,
+    header: ({ table }) => <SortableHeader title="Sr.No" columnId="srNo" table={table} />,
+    size: 55,
     cell: ({ row, table }) => {
       const meta = table.options.meta as any;
-      const isDesc = table.getState().sorting.some((s) => s.desc);
-
       const pageIndex = meta?.pageIndex ?? 0;
       const pageSize = meta?.pageSize ?? 50;
-      const staticTotalCount = meta?.totalCount ?? table.getRowModel().rows.length;
-      const localRowOffset = meta?.localRowOffset ?? 0;
-      const trueTotalCount = staticTotalCount + localRowOffset;
-
       const sortedIndex = table.getRowModel().rows.findIndex(r => r.id === row.id);
-      const globalOrdinalIndex = pageIndex * pageSize + (sortedIndex >= 0 ? sortedIndex : row.index);
-      const displayNo = isDesc ? trueTotalCount - globalOrdinalIndex : globalOrdinalIndex + 1;
+      const displayNo = pageIndex * pageSize + (sortedIndex >= 0 ? sortedIndex : row.index) + 1;
 
       return (
         <div className="h-10 w-full flex items-center px-1 text-sm text-slate-300 truncate overflow-hidden whitespace-nowrap">
@@ -430,122 +465,56 @@ export const columns: ColumnDef<CourierEntry>[] = [
   },
   {
     accessorKey: "date",
-    header: ({ table }) => {
-      const meta = table.options.meta;
-      if (meta?.mode === "all" && meta?.filterProps) {
-        const filters = meta.filterProps;
-        return (
-          <div className="flex items-center gap-1">
-            Date
-            <Popover>
-              <PopoverTrigger className={`h-6 w-6 inline-flex items-center justify-center rounded-md hover:bg-slate-800 ${(filters.startDate && filters.endDate) ? 'text-blue-400' : 'text-slate-400'} hover:text-white transition-colors`}>
-                <Filter className="h-3 w-3" />
-              </PopoverTrigger>
-              <PopoverContent className="w-64 p-3 bg-slate-900 border-white/10" align="start">
-                <div className="space-y-3">
-                  <h4 className="font-medium text-sm text-white">Filter by Date</h4>
-                  <div className="grid gap-2">
-                    <div className="grid items-center gap-1">
-                      <label className="text-xs text-slate-400">Start Date</label>
-                      <Input type="date" value={filters.startDate} onChange={(e) => filters.onStartDateChange(e.target.value)} className="h-8 text-sm" />
-                    </div>
-                    <div className="grid items-center gap-1">
-                      <label className="text-xs text-slate-400">End Date</label>
-                      <Input type="date" value={filters.endDate} onChange={(e) => filters.onEndDateChange(e.target.value)} className="h-8 text-sm" />
-                    </div>
-                  </div>
-                  <Button onClick={() => { filters.onApplyFilters(); }} className="w-full h-8 text-xs bg-blue-600 hover:bg-blue-700 text-white">Apply</Button>
-                </div>
-              </PopoverContent>
-            </Popover>
-          </div>
-        );
-      }
-      return "Date";
-    },
+    header: ({ table }) => <SortableHeader title="Date" columnId="date" table={table} />,
     size: 130,
     cell: EditableCell
   },
   {
     accessorKey: "challanNo",
-    header: "Challan No",
-    size: 80,
+    header: ({ table }) => <SortableHeader title="Challan No" columnId="challanNo" table={table} />,
+    size: 95,
     cell: EditableCell
   },
   {
     accessorKey: "fromParty",
-    header: "From Party",
+    header: ({ table }) => <SortableHeader title="From Party" columnId="fromParty" table={table} />,
     size: 180,
     cell: AutocompleteCell
   },
   {
     accessorKey: "toParty",
-    header: "To Party",
+    header: ({ table }) => <SortableHeader title="To Party" columnId="toParty" table={table} />,
     size: 180,
     cell: AutocompleteCell
   },
   {
     accessorKey: "weightValue",
-    header: "Weight",
-    size: 90,
+    header: ({ table }) => <SortableHeader title="Weight" columnId="weightValue" table={table} />,
+    size: 95,
     cell: WeightCell
   },
   {
     accessorKey: "destination",
-    header: "Destination",
-    size: 110,
+    header: ({ table }) => <SortableHeader title="Destination" columnId="destination" table={table} />,
+    size: 120,
     cell: AutocompleteCell
   },
   {
     accessorKey: "amount",
-    header: "Amount",
-    size: 60,
+    header: ({ table }) => <SortableHeader title="Amount" columnId="amount" table={table} />,
+    size: 70,
     cell: EditableCell
   },
   {
     accessorKey: "status",
-    header: ({ table }) => {
-      const meta = table.options.meta;
-      if (meta?.mode === "all" && meta?.filterProps) {
-        const filters = meta.filterProps;
-        return (
-          <div className="flex items-center gap-1">
-            Status
-            <Popover>
-              <PopoverTrigger className={`h-6 w-6 inline-flex items-center justify-center rounded-md hover:bg-slate-800 ${(filters.statusFilter && filters.statusFilter !== "all") ? 'text-purple-400' : 'text-slate-400'} hover:text-white transition-colors`}>
-                <Filter className="h-3 w-3" />
-              </PopoverTrigger>
-              <PopoverContent className="w-40 p-2 bg-slate-900 border-white/10" align="start">
-                <div className="flex flex-col gap-1">
-                  {["all", "Account", "Cash"].map(s => (
-                    <Button
-                      key={s}
-                      variant="ghost"
-                      size="sm"
-                      className={`justify-start text-xs h-8 ${filters.statusFilter === s ? 'bg-purple-500/20 text-purple-400' : 'text-slate-300'} hover:bg-slate-800`}
-                      onClick={() => {
-                        const newStatus = (filters.statusFilter === s && s !== "all") ? "all" : s;
-                        filters.onApplyStatusFilter(newStatus);
-                      }}
-                    >
-                      {s === "all" ? "All Statuses" : s}
-                    </Button>
-                  ))}
-                </div>
-              </PopoverContent>
-            </Popover>
-          </div>
-        );
-      }
-      return "Status";
-    },
-    size: 85,
+    header: ({ table }) => <SortableHeader title="Status" columnId="status" table={table} />,
+    size: 90,
     cell: EditableCell
   },
   {
     accessorKey: "mode",
-    header: "Mode",
-    size: 85,
+    header: ({ table }) => <SortableHeader title="Mode" columnId="mode" table={table} />,
+    size: 90,
     cell: EditableCell
   },
   {

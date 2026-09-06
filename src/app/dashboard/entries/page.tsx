@@ -13,12 +13,14 @@ import { toast } from "sonner";
 import {
   List, Trash2, Calendar, Loader2, FolderOpen, Plus, ArrowLeft, ArrowRight,
   AlertCircle, RefreshCw, X, HelpCircle, CheckCircle, Lock, Archive,
-  TrendingUp, Coins, FileText, Settings2, Pencil
+  TrendingUp, Coins, FileText, Settings2, Pencil, Download, SlidersHorizontal, Search
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import * as XLSX from "xlsx";
 import { getAutocompleteData } from "@/lib/autocomplete";
 import { formatWeight } from "@/lib/utils";
 import { useRegisters, Register } from "@/context/RegisterContext";
+import { RegisterFilterPopover, RegisterFilters, DEFAULT_REGISTER_FILTERS, FilterOptions } from "@/components/RegisterFilterPopover";
 
 // Status Colors
 const registerStatusColors: Record<string, string> = {
@@ -335,7 +337,6 @@ function CourierEntryPageInner() {
   const searchParams = useSearchParams();
   const registerId = searchParams.get("registerId");
   const pageParam = searchParams.get("page");
-  const currentPage = pageParam ? parseInt(pageParam, 10) : 1;
 
   const {
     registers,
@@ -346,6 +347,7 @@ function CourierEntryPageInner() {
     createRegister,
     updateRegisterStatus,
     deleteRegister,
+    setFilterMetrics,
   } = useRegisters();
 
   const [entries, setEntries] = useState<any[]>([]);
@@ -356,6 +358,83 @@ function CourierEntryPageInner() {
     toParties: string[];
     destinations: string[];
   }>({ fromParties: [], toParties: [], destinations: [] });
+
+  // ── Pipeline State: Search, Filter, Sort, Pagination ──
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filters, setFilters] = useState<RegisterFilters>(DEFAULT_REGISTER_FILTERS);
+  const [sorting, setSorting] = useState<{ column: string; direction: "asc" | "desc" | null }>({
+    column: "srNo",
+    direction: "desc",
+  });
+  const [currentPage, setCurrentPage] = useState(pageParam ? parseInt(pageParam, 10) : 1);
+
+  // Sync currentPage from URL query parameter
+  useEffect(() => {
+    if (pageParam) {
+      setCurrentPage(parseInt(pageParam, 10));
+    } else {
+      setCurrentPage(1);
+    }
+  }, [pageParam]);
+
+  // Reset pipeline on register switch (Register Isolation)
+  useEffect(() => {
+    setSearchQuery("");
+    setFilters(DEFAULT_REGISTER_FILTERS);
+    setSorting({ column: "srNo", direction: "desc" });
+    setCurrentPage(1);
+  }, [registerId]);
+
+  // Sync page changes to URL
+  const handlePageChange = useCallback((newPage: number) => {
+    setCurrentPage(newPage);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("page", newPage.toString());
+    router.replace(`/dashboard/entries?${params.toString()}`, { scroll: false });
+  }, [router, searchParams]);
+
+  // Handlers that reset page to 1
+  const handleSearchChange = useCallback((val: string) => {
+    setSearchQuery(val);
+    setCurrentPage(1);
+  }, []);
+
+  const handleFiltersChange = useCallback((newFilters: RegisterFilters) => {
+    setFilters(newFilters);
+    setCurrentPage(1);
+  }, []);
+
+  const handleToggleSort = useCallback((columnId: string) => {
+    setSorting((prev) => {
+      if (prev.column !== columnId) {
+        return { column: columnId, direction: "asc" };
+      }
+      if (prev.direction === "asc") {
+        return { column: columnId, direction: "desc" };
+      }
+      // Third click: Default / unsorted
+      return { column: "srNo", direction: "desc" };
+    });
+    setCurrentPage(1);
+  }, []);
+
+  // Update canonical entries on row save/delete
+  const handleEntrySaved = useCallback((savedEntry: any, isEdit: boolean) => {
+    setEntries((prev) => {
+      if (isEdit) {
+        return prev.map((e) => (e.id === savedEntry.id ? { ...e, ...savedEntry } : e));
+      } else {
+        if (prev.some((e) => e.id === savedEntry.id)) return prev;
+        return [savedEntry, ...prev];
+      }
+    });
+    refreshRegisters();
+  }, [refreshRegisters]);
+
+  const handleEntryDeleted = useCallback((deletedId: string) => {
+    setEntries((prev) => prev.filter((e) => e.id !== deletedId));
+    refreshRegisters();
+  }, [refreshRegisters]);
 
   const [mobileDefaultDate, setMobileDefaultDate] = useState<string | null>(null);
   const [defaultDateModalOpen, setDefaultDateModalOpen] = useState(false);
@@ -426,13 +505,11 @@ function CourierEntryPageInner() {
     }
   }, [registerId, registers]);
 
-  // Fetch entries for active register
+  // Fetch ALL entries for active register
   const fetchData = useCallback(async () => {
+    if (!registerId) return;
     setIsLoading(true);
-    const params = new URLSearchParams({ limit: "50", page: currentPage.toString() });
-    if (registerId) {
-      params.append("registerId", registerId);
-    }
+    const params = new URLSearchParams({ registerId, limit: "all" });
 
     const [entRes, acData] = await Promise.all([
       fetch(`/api/couriers?${params.toString()}`),
@@ -441,13 +518,14 @@ function CourierEntryPageInner() {
 
     if (entRes.ok) {
       const json = await entRes.json();
-      setEntries(Array.isArray(json) ? json : (json.data || []));
-      setTotalCount(json.total || (Array.isArray(json) ? json.length : 0));
+      const list = Array.isArray(json) ? json : (json.data || []);
+      setEntries(list);
+      setTotalCount(json.total || list.length);
     }
 
     setAutocompleteData(acData);
     setIsLoading(false);
-  }, [registerId, currentPage]);
+  }, [registerId]);
 
   useEffect(() => {
     if (registerId) {
@@ -459,7 +537,237 @@ function CourierEntryPageInner() {
     }
   }, [registerId, fetchData]);
 
-  const visibleData = useMemo(() => entries, [entries]);
+  // ── Dynamic Filter Options from Current Register ──
+  const filterOptions: FilterOptions = useMemo(() => {
+    const fromMap = new Map<string, number>();
+    const toMap = new Map<string, number>();
+    const destMap = new Map<string, number>();
+    const statusMap = new Map<string, number>();
+    const modeMap = new Map<string, number>();
+
+    entries.forEach((e) => {
+      if (e.fromParty?.trim()) {
+        const p = e.fromParty.trim();
+        fromMap.set(p, (fromMap.get(p) || 0) + 1);
+      }
+      if (e.toParty?.trim()) {
+        const p = e.toParty.trim();
+        toMap.set(p, (toMap.get(p) || 0) + 1);
+      }
+      if (e.destination?.trim()) {
+        const d = e.destination.trim();
+        destMap.set(d, (destMap.get(d) || 0) + 1);
+      }
+      if (e.status?.trim()) {
+        const s = e.status.trim();
+        statusMap.set(s, (statusMap.get(s) || 0) + 1);
+      }
+      if (e.mode?.trim()) {
+        const m = e.mode.trim();
+        modeMap.set(m, (modeMap.get(m) || 0) + 1);
+      }
+    });
+
+    const toList = (map: Map<string, number>) =>
+      Array.from(map.entries())
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+    return {
+      fromParties: toList(fromMap),
+      toParties: toList(toMap),
+      destinations: toList(destMap),
+      statuses: toList(statusMap),
+      modes: toList(modeMap),
+    };
+  }, [entries]);
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (filters.dateType === "exact" && filters.exactDate) count++;
+    if (filters.dateType === "range" && (filters.startDate || filters.endDate)) count++;
+    count += filters.fromParties.length;
+    count += filters.toParties.length;
+    count += filters.destinations.length;
+    count += filters.statuses.length;
+    count += filters.modes.length;
+    return count;
+  }, [filters]);
+
+  // ── Step 1: Search Pipeline across ALL Register Entries ──
+  const searchedData = useMemo(() => {
+    if (!searchQuery.trim()) return entries;
+    const q = searchQuery.trim().toLowerCase();
+
+    return entries.filter((row) => {
+      if (String(row.challanNo ?? "").toLowerCase().includes(q)) return true;
+      if (String(row.fromParty ?? "").toLowerCase().includes(q)) return true;
+      if (String(row.toParty ?? "").toLowerCase().includes(q)) return true;
+      if (String(row.destination ?? "").toLowerCase().includes(q)) return true;
+      if (String(row.status ?? "").toLowerCase().includes(q)) return true;
+      if (String(row.mode ?? "").toLowerCase().includes(q)) return true;
+      if (String(row.amount ?? "").toLowerCase().includes(q)) return true;
+      if (String(row.srNo ?? "").toLowerCase().includes(q)) return true;
+      const weightStr = `${row.weightValue ?? ""} ${row.weightUnit ?? ""}`.toLowerCase();
+      if (weightStr.includes(q)) return true;
+
+      if (row.date) {
+        const dateObj = new Date(row.date);
+        const isoDate = dateObj.toISOString().split("T")[0];
+        if (isoDate.includes(q)) return true;
+        const d = String(dateObj.getDate()).padStart(2, "0");
+        const m = String(dateObj.getMonth() + 1).padStart(2, "0");
+        const y = dateObj.getFullYear();
+        const ddmmyyyyDash = `${d}-${m}-${y}`;
+        const ddmmyyyySlash = `${d}/${m}/${y}`;
+        if (ddmmyyyyDash.includes(q) || ddmmyyyySlash.includes(q)) return true;
+      }
+
+      return false;
+    });
+  }, [entries, searchQuery]);
+
+  // ── Step 2: Multi-Criteria Filter Pipeline (AND Logic) ──
+  const filteredData = useMemo(() => {
+    return searchedData.filter((row) => {
+      if (filters.fromParties.length > 0 && !filters.fromParties.includes(row.fromParty)) {
+        return false;
+      }
+      if (filters.toParties.length > 0 && !filters.toParties.includes(row.toParty)) {
+        return false;
+      }
+      if (filters.destinations.length > 0 && !filters.destinations.includes(row.destination)) {
+        return false;
+      }
+      if (filters.statuses.length > 0 && !filters.statuses.includes(row.status)) {
+        return false;
+      }
+      if (filters.modes.length > 0 && !filters.modes.includes(row.mode)) {
+        return false;
+      }
+
+      if (filters.dateType === "exact" && filters.exactDate) {
+        if (!row.date) return false;
+        const rowDateStr = new Date(row.date).toISOString().split("T")[0];
+        if (rowDateStr !== filters.exactDate) return false;
+      } else if (filters.dateType === "range") {
+        if (!row.date) return false;
+        const rowDateStr = new Date(row.date).toISOString().split("T")[0];
+        if (filters.startDate && rowDateStr < filters.startDate) return false;
+        if (filters.endDate && rowDateStr > filters.endDate) return false;
+      }
+
+      return true;
+    });
+  }, [searchedData, filters]);
+
+  // ── Step 3: Type-Aware Sorting ──
+  const normalizeWeight = (val: number | string | undefined | null, unit: string | undefined | null): number => {
+    const num = Number(val) || 0;
+    const u = (unit || "gm").toLowerCase();
+    if (u === "kg") return num * 1000;
+    return num;
+  };
+
+  const sortedData = useMemo(() => {
+    if (!sorting.column || !sorting.direction) {
+      return [...filteredData].sort((a, b) => (Number(b.srNo) || 0) - (Number(a.srNo) || 0));
+    }
+
+    const { column, direction } = sorting;
+    const dir = direction === "asc" ? 1 : -1;
+
+    return [...filteredData].sort((a, b) => {
+      const valA = a[column];
+      const valB = b[column];
+
+      if (valA == null && valB == null) return 0;
+      if (valA == null) return 1;
+      if (valB == null) return -1;
+
+      if (column === "date") {
+        const timeA = new Date(valA).getTime() || 0;
+        const timeB = new Date(valB).getTime() || 0;
+        return (timeA - timeB) * dir;
+      }
+
+      if (column === "challanNo" || column === "srNo" || column === "amount") {
+        const numA = Number(valA) || 0;
+        const numB = Number(valB) || 0;
+        return (numA - numB) * dir;
+      }
+
+      if (column === "weightValue") {
+        const wA = normalizeWeight(a.weightValue, a.weightUnit);
+        const wB = normalizeWeight(b.weightValue, b.weightUnit);
+        return (wA - wB) * dir;
+      }
+
+      return String(valA).localeCompare(String(valB), undefined, { sensitivity: "base" }) * dir;
+    });
+  }, [filteredData, sorting]);
+
+  // ── Step 4: Pagination Pipeline ──
+  const pageSize = 50;
+  const totalPages = Math.max(1, Math.ceil(sortedData.length / pageSize));
+  const paginatedData = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return sortedData.slice(start, start + pageSize);
+  }, [sortedData, currentPage]);
+
+  useEffect(() => {
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(1);
+    }
+  }, [currentPage, totalPages]);
+
+  // ── Sync Filter Metrics with Navbar / RegisterContext ──
+  useEffect(() => {
+    const isFiltered = searchQuery.trim().length > 0 || activeFilterCount > 0;
+    setFilterMetrics({
+      filteredCount: sortedData.length,
+      totalCount: entries.length,
+      currentPage,
+      totalPages,
+      isFiltered,
+      onPageChange: (newPage: number) => {
+        handlePageChange(newPage);
+      },
+    });
+    return () => {
+      setFilterMetrics(null);
+    };
+  }, [sortedData.length, entries.length, currentPage, totalPages, searchQuery, activeFilterCount, setFilterMetrics, handlePageChange]);
+
+  // ── Step 5: Filter-Aware Export (Exports exact sortedData) ──
+  const handleExportExcel = useCallback(() => {
+    if (sortedData.length === 0) {
+      toast.error("No entries to export with current filters.");
+      return;
+    }
+    const exportRows = sortedData.map((r, i) => ({
+      "Sr.No": i + 1,
+      Date: r.date ? new Date(r.date).toISOString().split("T")[0] : "",
+      "Challan No": r.challanNo,
+      "From Party": r.fromParty,
+      "To Party": r.toParty,
+      Weight: `${r.weightValue} ${r.weightUnit}`,
+      Destination: r.destination,
+      Amount: r.amount,
+      Status: r.status,
+      Mode: r.mode,
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportRows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Courier Entries");
+    const regName = (activeRegister?.name || "Register").replace(/[^a-zA-Z0-9_-]/g, "_");
+    const dateStr = new Date().toISOString().split("T")[0];
+    XLSX.writeFile(workbook, `${regName}_Export_${dateStr}.xlsx`);
+    toast.success(`Exported ${sortedData.length} entries to Excel`);
+  }, [sortedData, activeRegister]);
+
+  const visibleData = paginatedData;
   const existingChallans = entries.map((e: any) => String(e.challanNo));
 
   const handleMigrate = async () => {
@@ -727,11 +1035,24 @@ function CourierEntryPageInner() {
             <DataTable
               columns={columns}
               data={visibleData}
-              totalCount={totalCount}
+              totalCount={entries.length}
+              filteredCount={sortedData.length}
               pageIndex={currentPage - 1}
               pageSize={50}
-              onExportExcel={() => window.open(`/api/couriers/export?registerId=${registerId}`)}
+              totalPages={totalPages}
+              onPageChange={handlePageChange}
+              searchValue={searchQuery}
+              onSearchChange={handleSearchChange}
+              filters={filters}
+              onFiltersChange={handleFiltersChange}
+              filterOptions={filterOptions}
+              activeFilterCount={activeFilterCount}
+              currentSort={sorting}
+              onToggleSort={handleToggleSort}
+              onExportExcel={handleExportExcel}
               activeRegister={activeRegister}
+              onEntrySaved={handleEntrySaved}
+              onEntryDeleted={handleEntryDeleted}
             />
           </div>
         )}
@@ -739,20 +1060,153 @@ function CourierEntryPageInner() {
         {/* Mobile: card list + floating form */}
         {isMobile && (
           <div className="flex-1 overflow-y-auto space-y-3 pb-24">
+            {/* Mobile Search & Filter Toolbar */}
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+                  <Input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => handleSearchChange(e.target.value)}
+                    placeholder="Search all entries..."
+                    className="h-9 pl-9 pr-8 text-xs rounded-xl bg-white/50 dark:bg-slate-900/50 border-white/50 dark:border-white/10"
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => handleSearchChange("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                <RegisterFilterPopover
+                  filters={filters}
+                  onChange={handleFiltersChange}
+                  options={filterOptions}
+                  activeCount={activeFilterCount}
+                />
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportExcel}
+                  title="Export filtered entries"
+                  className="h-9 px-2.5 rounded-xl border-white/50 dark:border-white/10 bg-white/40 dark:bg-slate-900/40 text-xs font-semibold text-slate-700 dark:text-slate-300"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+
+              {/* Mobile Active Filter Chips */}
+              {(activeFilterCount > 0 || Boolean(searchQuery.trim())) && (
+                <div className="flex flex-wrap items-center gap-1.5 p-2 bg-slate-900/60 rounded-xl border border-white/10 text-xs">
+                  <span className="text-[11px] font-semibold text-slate-400 mr-1">Active:</span>
+
+                  {searchQuery.trim() && (
+                    <div className="flex items-center gap-1 px-2 py-0.5 bg-blue-500/15 border border-blue-500/30 text-blue-300 rounded-full text-[10px] font-medium">
+                      <span>"{searchQuery}"</span>
+                      <button onClick={() => handleSearchChange("")} className="hover:text-white p-0.5"><X className="w-2.5 h-2.5" /></button>
+                    </div>
+                  )}
+
+                  {filters.dateType === "exact" && filters.exactDate && (
+                    <div className="flex items-center gap-1 px-2 py-0.5 bg-blue-500/15 border border-blue-500/30 text-blue-300 rounded-full text-[10px] font-medium">
+                      <span>Date: {filters.exactDate}</span>
+                      <button onClick={() => handleFiltersChange({ ...filters, dateType: "all", exactDate: "" })} className="hover:text-white p-0.5"><X className="w-2.5 h-2.5" /></button>
+                    </div>
+                  )}
+
+                  {filters.dateType === "range" && (filters.startDate || filters.endDate) && (
+                    <div className="flex items-center gap-1 px-2 py-0.5 bg-blue-500/15 border border-blue-500/30 text-blue-300 rounded-full text-[10px] font-medium">
+                      <span>{filters.startDate || "Start"} to {filters.endDate || "End"}</span>
+                      <button onClick={() => handleFiltersChange({ ...filters, dateType: "all", startDate: "", endDate: "" })} className="hover:text-white p-0.5"><X className="w-2.5 h-2.5" /></button>
+                    </div>
+                  )}
+
+                  {filters.fromParties.map((p) => (
+                    <div key={`mob-from-${p}`} className="flex items-center gap-1 px-2 py-0.5 bg-purple-500/15 border border-purple-500/30 text-purple-300 rounded-full text-[10px] font-medium">
+                      <span>From: {p}</span>
+                      <button onClick={() => handleFiltersChange({ ...filters, fromParties: filters.fromParties.filter(i => i !== p) })} className="hover:text-white p-0.5"><X className="w-2.5 h-2.5" /></button>
+                    </div>
+                  ))}
+
+                  {filters.toParties.map((p) => (
+                    <div key={`mob-to-${p}`} className="flex items-center gap-1 px-2 py-0.5 bg-purple-500/15 border border-purple-500/30 text-purple-300 rounded-full text-[10px] font-medium">
+                      <span>To: {p}</span>
+                      <button onClick={() => handleFiltersChange({ ...filters, toParties: filters.toParties.filter(i => i !== p) })} className="hover:text-white p-0.5"><X className="w-2.5 h-2.5" /></button>
+                    </div>
+                  ))}
+
+                  {filters.destinations.map((d) => (
+                    <div key={`mob-dest-${d}`} className="flex items-center gap-1 px-2 py-0.5 bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 rounded-full text-[10px] font-medium">
+                      <span>Dest: {d}</span>
+                      <button onClick={() => handleFiltersChange({ ...filters, destinations: filters.destinations.filter(i => i !== d) })} className="hover:text-white p-0.5"><X className="w-2.5 h-2.5" /></button>
+                    </div>
+                  ))}
+
+                  {filters.statuses.map((s) => (
+                    <div key={`mob-st-${s}`} className="flex items-center gap-1 px-2 py-0.5 bg-amber-500/15 border border-amber-500/30 text-amber-300 rounded-full text-[10px] font-medium">
+                      <span>Status: {s}</span>
+                      <button onClick={() => handleFiltersChange({ ...filters, statuses: filters.statuses.filter(i => i !== s) })} className="hover:text-white p-0.5"><X className="w-2.5 h-2.5" /></button>
+                    </div>
+                  ))}
+
+                  {filters.modes.map((m) => (
+                    <div key={`mob-m-${m}`} className="flex items-center gap-1 px-2 py-0.5 bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 rounded-full text-[10px] font-medium">
+                      <span>Mode: {m}</span>
+                      <button onClick={() => handleFiltersChange({ ...filters, modes: filters.modes.filter(i => i !== m) })} className="hover:text-white p-0.5"><X className="w-2.5 h-2.5" /></button>
+                    </div>
+                  ))}
+
+                  <button
+                    onClick={() => {
+                      handleSearchChange("");
+                      handleFiltersChange(DEFAULT_REGISTER_FILTERS);
+                    }}
+                    className="text-[10px] font-semibold text-red-400 hover:text-red-300 hover:underline px-1 py-0.5 ml-auto"
+                  >
+                    Clear All
+                  </button>
+                </div>
+              )}
+            </div>
+
             {isLoading && entries.length === 0 ? (
               <div className="flex flex-col gap-3 py-2">
                 {[1, 2, 3].map((i) => (
                   <div key={i} className="rounded-2xl bg-slate-100 dark:bg-slate-800 animate-pulse h-36 w-full border border-slate-200 dark:border-slate-800" />
                 ))}
               </div>
-            ) : entries.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 text-slate-400 text-sm gap-2">
-                <span className="text-4xl">📦</span>
-                <p className="font-semibold text-base text-slate-800 dark:text-slate-200">No entries in register</p>
-                <p className="text-xs text-slate-500">Tap the + button below to log your first entry.</p>
+            ) : paginatedData.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-slate-400 text-sm gap-2">
+                <span className="text-4xl">🔍</span>
+                <p className="font-semibold text-base text-slate-800 dark:text-slate-200">
+                  {entries.length === 0 ? "No entries in register" : "No matching entries found"}
+                </p>
+                <p className="text-xs text-slate-500 text-center max-w-[240px]">
+                  {entries.length === 0
+                    ? "Tap the + button below to log your first entry."
+                    : "Try adjusting your search keywords or clear active filters."}
+                </p>
+                {entries.length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      handleSearchChange("");
+                      handleFiltersChange(DEFAULT_REGISTER_FILTERS);
+                    }}
+                    className="mt-2 text-xs rounded-xl"
+                  >
+                    Clear Filters
+                  </Button>
+                )}
               </div>
             ) : (
-              visibleData.map((entry: any) => (
+              paginatedData.map((entry: any) => (
                 <MobileEntryCard
                   key={entry.id}
                   entry={entry}
@@ -766,6 +1220,36 @@ function CourierEntryPageInner() {
                   }}
                 />
               ))
+            )}
+
+            {/* Mobile Pagination Footer */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between p-3 bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl rounded-2xl border border-white/50 dark:border-white/10 text-xs">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={currentPage <= 1}
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  className="h-8 px-3 rounded-xl border-slate-200 dark:border-slate-800 text-xs"
+                >
+                  Previous
+                </Button>
+                <div className="text-center font-medium text-slate-600 dark:text-slate-400">
+                  Page <strong>{currentPage}</strong> of <strong>{totalPages}</strong>
+                  <div className="text-[10px] text-slate-400">
+                    {sortedData.length} entries
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={currentPage >= totalPages}
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  className="h-8 px-3 rounded-xl border-slate-200 dark:border-slate-800 text-xs"
+                >
+                  Next
+                </Button>
+              </div>
             )}
           </div>
         )}
@@ -784,18 +1268,8 @@ function CourierEntryPageInner() {
               if (!val) setEditingEntry(null);
             }}
             onSaved={(savedEntry, isEdit) => {
-              // Trigger reload of active register counts as well
-              refreshRegisters();
-              startTransition(() => {
-                setEntries((prev) => {
-                  if (isEdit) {
-                    return prev.map((e) => (e.id === savedEntry.id ? { ...e, ...savedEntry } : e));
-                  } else {
-                    if (prev.some((e) => e.id === savedEntry.id)) return prev;
-                    return [savedEntry, ...prev].slice(0, 100);
-                  }
-                });
-              });
+              handleEntrySaved(savedEntry, isEdit);
+              setIsFormOpen(false);
               setEditingEntry(null);
             }}
             mobileDefaultDate={mobileDefaultDate}

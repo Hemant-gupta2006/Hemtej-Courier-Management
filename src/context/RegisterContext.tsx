@@ -17,11 +17,22 @@ export interface Register {
   pendingCount: number;
 }
 
+export interface RegisterFilterMetrics {
+  filteredCount: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  isFiltered: boolean;
+  onPageChange?: (page: number) => void;
+}
+
 interface RegisterContextType {
   registers: Register[];
   activeRegister: Register | null;
   setActiveRegister: (register: Register | null) => void;
   isLoading: boolean;
+  filterMetrics: RegisterFilterMetrics | null;
+  setFilterMetrics: (metrics: RegisterFilterMetrics | null) => void;
   refreshRegisters: () => Promise<void>;
   createRegister: (month: number, year: number, name?: string) => Promise<boolean>;
   updateRegisterStatus: (id: string, status: "Active" | "Locked" | "Archived") => Promise<boolean>;
@@ -34,11 +45,13 @@ export const RegisterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const { data: session } = useSession();
   const [registers, setRegisters] = useState<Register[]>([]);
   const [activeRegister, setActiveRegisterState] = useState<Register | null>(null);
+  const [filterMetrics, setFilterMetrics] = useState<RegisterFilterMetrics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Set active register and persist to localStorage
   const setActiveRegister = useCallback((register: Register | null) => {
     setActiveRegisterState(register);
+    setFilterMetrics(null);
     if (register) {
       localStorage.setItem("hemtej_active_register_id", register.id);
     } else {
@@ -186,6 +199,8 @@ export const RegisterProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         activeRegister,
         setActiveRegister,
         isLoading,
+        filterMetrics,
+        setFilterMetrics,
         refreshRegisters,
         createRegister,
         updateRegisterStatus,

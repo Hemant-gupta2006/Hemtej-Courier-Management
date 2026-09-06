@@ -97,6 +97,8 @@ model CourierEntry {
   @@index([userId, fromParty])
   @@index([userId, toParty])
   @@index([userId, destination])
+  @@index([userId, registerId])
+  @@index([registerId])
 }
 
 model CourierRegister {

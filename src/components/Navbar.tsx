@@ -98,16 +98,20 @@ function NavbarInner({ onToggleSidebar, isSidebarOpen }: NavbarProps) {
   const searchParams = useSearchParams();
   const registerId = searchParams.get("registerId");
 
-  const { activeRegister, updateRegisterStatus, deleteRegister } = useRegisters();
+  const { activeRegister, updateRegisterStatus, deleteRegister, filterMetrics } = useRegisters();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   const pageParam = searchParams.get("page");
-  const currentPage = pageParam ? parseInt(pageParam, 10) : 1;
+  const rawPage = pageParam ? parseInt(pageParam, 10) : 1;
+  const currentPage = filterMetrics ? filterMetrics.currentPage : rawPage;
   const entryCount = activeRegister?.entryCount ?? 0;
-  const totalPages = Math.max(1, Math.ceil(entryCount / 50));
+  const totalPages = filterMetrics ? filterMetrics.totalPages : Math.max(1, Math.ceil(entryCount / 50));
 
   const handlePageChange = (newPage: number) => {
+    if (filterMetrics?.onPageChange) {
+      filterMetrics.onPageChange(newPage);
+    }
     const params = new URLSearchParams(searchParams.toString());
     params.set("page", newPage.toString());
     router.push(`${pathname}?${params.toString()}`);
@@ -232,7 +236,17 @@ function NavbarInner({ onToggleSidebar, isSidebarOpen }: NavbarProps) {
           {isRegisterView && (
             <div className="flex items-center gap-2">
               <div className="hidden sm:flex items-center gap-1.5 text-[11px] font-medium text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30 px-3 py-1 rounded-full">
-                <span>Entries <strong className="text-slate-800 dark:text-slate-200">{activeRegister.entryCount ?? 0}</strong></span>
+                <span>
+                  Entries{" "}
+                  {filterMetrics?.isFiltered ? (
+                    <strong className="text-blue-600 dark:text-blue-400 font-bold">
+                      {filterMetrics.filteredCount}{" "}
+                      <span className="text-slate-400 font-normal">/ {filterMetrics.totalCount}</span>
+                    </strong>
+                  ) : (
+                    <strong className="text-slate-800 dark:text-slate-200">{activeRegister.entryCount ?? 0}</strong>
+                  )}
+                </span>
                 <span className="text-slate-300 dark:text-slate-700">|</span>
                 <span>Pending <strong className="text-slate-800 dark:text-slate-200">{activeRegister.pendingCount ?? 0}</strong></span>
                 <span className="text-slate-300 dark:text-slate-700">|</span>

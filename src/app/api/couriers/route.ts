@@ -25,10 +25,16 @@ export async function GET(req: Request) {
     const startDateParam = searchParams.get("startDate");
     const endDateParam = searchParams.get("endDate");
     const statusParam = searchParams.get("status");
+    const modeParam = searchParams.get("mode");
+    const fromPartyParam = searchParams.get("fromParty");
+    const toPartyParam = searchParams.get("toParty");
+    const destinationParam = searchParams.get("destination");
     const registerIdParam = searchParams.get("registerId");
+    const sortByParam = searchParams.get("sortBy");
+    const sortOrderParam = searchParams.get("sortOrder");
 
     // Determine pagination parameters
-    const take = limitParam ? parseInt(limitParam, 10) : undefined;
+    const take = (limitParam && limitParam !== "all" && limitParam !== "-1") ? parseInt(limitParam, 10) : undefined;
     const page = pageParam ? parseInt(pageParam, 10) : 1;
     let skip = undefined;
 
@@ -55,26 +61,78 @@ export async function GET(req: Request) {
     }
 
     if (statusParam && statusParam !== "all" && statusParam !== "") {
-      where.status = statusParam;
+      const statuses = statusParam.split(",").map(s => s.trim()).filter(Boolean);
+      if (statuses.length === 1) {
+        where.status = statuses[0];
+      } else if (statuses.length > 1) {
+        where.status = { in: statuses };
+      }
+    }
+
+    if (modeParam && modeParam !== "all" && modeParam !== "") {
+      const modes = modeParam.split(",").map(m => m.trim()).filter(Boolean);
+      if (modes.length === 1) {
+        where.mode = modes[0];
+      } else if (modes.length > 1) {
+        where.mode = { in: modes };
+      }
+    }
+
+    if (fromPartyParam && fromPartyParam !== "all" && fromPartyParam !== "") {
+      const parties = fromPartyParam.split(",").map(p => p.trim()).filter(Boolean);
+      if (parties.length === 1) {
+        where.fromParty = { equals: parties[0], mode: "insensitive" };
+      } else if (parties.length > 1) {
+        where.fromParty = { in: parties, mode: "insensitive" };
+      }
+    }
+
+    if (toPartyParam && toPartyParam !== "all" && toPartyParam !== "") {
+      const parties = toPartyParam.split(",").map(p => p.trim()).filter(Boolean);
+      if (parties.length === 1) {
+        where.toParty = { equals: parties[0], mode: "insensitive" };
+      } else if (parties.length > 1) {
+        where.toParty = { in: parties, mode: "insensitive" };
+      }
+    }
+
+    if (destinationParam && destinationParam !== "all" && destinationParam !== "") {
+      const dests = destinationParam.split(",").map(d => d.trim()).filter(Boolean);
+      if (dests.length === 1) {
+        where.destination = { equals: dests[0], mode: "insensitive" };
+      } else if (dests.length > 1) {
+        where.destination = { in: dests, mode: "insensitive" };
+      }
     }
 
     if (searchParam) {
-      const searchNum = parseInt(searchParam, 10);
+      const trimmedSearch = searchParam.trim();
+      const searchNum = parseInt(trimmedSearch, 10);
       where.OR = [
-        { fromParty: { contains: searchParam, mode: "insensitive" } },
-        { toParty: { contains: searchParam, mode: "insensitive" } },
-        { destination: { contains: searchParam, mode: "insensitive" } },
+        { fromParty: { contains: trimmedSearch, mode: "insensitive" } },
+        { toParty: { contains: trimmedSearch, mode: "insensitive" } },
+        { destination: { contains: trimmedSearch, mode: "insensitive" } },
+        { status: { contains: trimmedSearch, mode: "insensitive" } },
+        { mode: { contains: trimmedSearch, mode: "insensitive" } },
       ];
       if (!isNaN(searchNum)) {
         where.OR.push({ challanNo: searchNum });
+        where.OR.push({ amount: searchNum });
       }
+    }
+
+    // Safe sorting allowlist
+    const allowedSortFields = ["srNo", "date", "challanNo", "fromParty", "toParty", "weightValue", "destination", "amount", "status", "mode", "createdAt"];
+    let orderBy: any = [{ srNo: "desc" }, { createdAt: "desc" }];
+    if (sortByParam && allowedSortFields.includes(sortByParam)) {
+      orderBy = [{ [sortByParam]: sortOrderParam === "asc" ? "asc" : "desc" }, { srNo: "desc" }];
     }
 
     // Execute queries concurrently
     const [couriers, total] = await Promise.all([
       prisma.courierEntry.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy,
         ...(take ? { take } : {}),
         ...(skip !== undefined ? { skip } : {}),
       }),
