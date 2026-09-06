@@ -180,6 +180,8 @@ model Invoice {
   party            BillingParty? @relation(fields: [partyId], references: [id], onDelete: SetNull)
   partySnapshot    Json
   businessSnapshot Json?
+  entryIds         String[] @default([])
+  entriesSnapshot  Json?
   entriesCount     Int      @default(0)
   grossAmount      Float    @default(0)
   cgst             Float    @default(0)

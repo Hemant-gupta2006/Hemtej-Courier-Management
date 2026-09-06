@@ -4,7 +4,6 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { generateBillingExcel } from "@/lib/excel-billing";
 import { recordActivity } from "@/lib/activityLog";
-import { calculateGstBillDate, resolveBillingMonthYear } from "@/lib/billing-date";
 
 export async function POST(
   req: Request,
@@ -29,75 +28,100 @@ export async function POST(
       return NextResponse.json({ success: false, error: "Cannot regenerate invoice without billNo" }, { status: 400 });
     }
 
-    // 1. Rebuild query using saved parameters
-    const where: any = { userId };
-    const pNames = invoice.billingPartyNames || [];
-    if (pNames.length > 0) {
-      where.OR = pNames.map((name: string) => ({
-        fromParty: { equals: name, mode: "insensitive" }
-      }));
-    }
+    // Historical Bill Snapshot Resolution:
+    // A historical bill must reproduce the exact entries and values used when it was created.
+    // We NEVER recalculate across the party's entire historical/current dataset.
+    let entries: any[] = [];
 
-    if (invoice.billingFromDate || invoice.billingToDate) {
-      where.date = {};
-      if (invoice.billingFromDate) where.date.gte = invoice.billingFromDate;
-      if (invoice.billingToDate) {
-        const end = new Date(invoice.billingToDate);
-        end.setHours(23, 59, 59, 999);
-        where.date.lte = end;
+    // 1. If entriesSnapshot is preserved, use it directly (frozen historical snapshot)
+    if (Array.isArray(invoice.entriesSnapshot) && invoice.entriesSnapshot.length > 0) {
+      entries = invoice.entriesSnapshot as any[];
+    } 
+    // 2. Otherwise, if entryIds are preserved, fetch specifically those entries by ID
+    else if (Array.isArray(invoice.entryIds) && invoice.entryIds.length > 0) {
+      entries = await prisma.courierEntry.findMany({
+        where: { id: { in: invoice.entryIds }, userId },
+        orderBy: { date: "asc" },
+      });
+    } 
+    // 3. Fallback for legacy invoices without snapshots or entryIds:
+    // Strictly constrain by the invoice's original date range and party names.
+    // NEVER allow an unconstrained query that could match all user records.
+    else {
+      const pNames = invoice.billingPartyNames || [];
+      const hasDateFilter = !!(invoice.billingFromDate || invoice.billingToDate);
+      const hasPartyFilter = pNames.length > 0;
+
+      if (!hasDateFilter && !hasPartyFilter) {
+        // If neither dates nor party names exist, check if entries are explicitly tagged
+        // with this invoiceId and match the original count.
+        const taggedEntries = await prisma.courierEntry.findMany({
+          where: { invoiceId, userId },
+          orderBy: { date: "asc" },
+        });
+
+        if (taggedEntries.length > 0 && (taggedEntries.length === invoice.entriesCount || invoice.entriesCount === 0)) {
+          entries = taggedEntries;
+        } else {
+          return NextResponse.json({
+            success: false,
+            error: "Cannot regenerate legacy bill: missing historical snapshot parameters"
+          }, { status: 400 });
+        }
+      } else {
+        const where: any = { userId };
+        if (hasPartyFilter) {
+          where.OR = pNames.map((name: string) => ({
+            fromParty: { equals: name, mode: "insensitive" }
+          }));
+        }
+        if (hasDateFilter) {
+          where.date = {};
+          if (invoice.billingFromDate) where.date.gte = invoice.billingFromDate;
+          if (invoice.billingToDate) {
+            const end = new Date(invoice.billingToDate);
+            end.setHours(23, 59, 59, 999);
+            where.date.lte = end;
+          }
+        }
+
+        entries = await prisma.courierEntry.findMany({
+          where,
+          orderBy: { date: "asc" },
+        });
+      }
+
+      // Backfill snapshot on the legacy invoice so future regenerations are protected
+      if (entries.length > 0 && (!invoice.entriesSnapshot || invoice.entryIds.length === 0)) {
+        await prisma.invoice.update({
+          where: { id: invoiceId },
+          data: {
+            entryIds: entries.map((e: any) => e.id),
+            entriesSnapshot: entries.map((e: any) => ({
+              id: e.id,
+              challanNo: e.challanNo,
+              date: e.date,
+              fromParty: e.fromParty,
+              toParty: e.toParty,
+              destination: e.destination,
+              amount: e.amount || 0,
+              weightValue: e.weightValue || 0,
+              weightUnit: e.weightUnit || "gm",
+              status: e.status || "Account",
+              mode: e.mode || "Surface",
+            })),
+          }
+        });
       }
     }
-
-    // 2. Fetch current entries
-    const entries = await prisma.courierEntry.findMany({
-      where,
-      orderBy: { date: "asc" },
-    });
 
     if (entries.length === 0) {
       return NextResponse.json({ success: false, error: "No billing entries found for regeneration" }, { status: 404 });
     }
 
-    // 3. Recalculate amounts
-    const rawGrossAmount = entries.reduce((sum: number, entry: any) => sum + (entry.amount || 0), 0);
-    const grossAmount = Number(rawGrossAmount.toFixed(2));
-    const cgst = Number((grossAmount * 0.09).toFixed(2));
-    const sgst = Number((grossAmount * 0.09).toFixed(2));
-    const igst = 0;
-    const netAmount = Number((grossAmount + cgst + sgst + igst).toFixed(2));
-
-    // 4. Resolve billing month & year and calculate GST bill date if billing dates are present
-    let invoiceDate = invoice.invoiceDate;
-    if (invoice.billingFromDate || invoice.billingToDate) {
-      const { billingMonth, billingYear } = resolveBillingMonthYear({
-        startDate: invoice.billingFromDate ? invoice.billingFromDate.toISOString().split('T')[0] : undefined,
-        endDate: invoice.billingToDate ? invoice.billingToDate.toISOString().split('T')[0] : undefined,
-      });
-      invoiceDate = calculateGstBillDate(billingMonth, billingYear, invoice.createdAt || new Date());
-    }
-
-    // Update the Invoice with recalculated amounts and date
-    const updatedInvoice = await prisma.invoice.update({
-      where: { id: invoiceId },
-      data: {
-        entriesCount: entries.length,
-        grossAmount,
-        cgst,
-        sgst,
-        igst,
-        netAmount,
-        invoiceDate,
-      }
-    });
-
-    await prisma.courierEntry.updateMany({
-      where: { id: { in: entries.map((e: any) => e.id) } },
-      data: { invoiceId }
-    });
-
-    // 5. Generate Excel
-    const partySnapshot = updatedInvoice.partySnapshot as any;
-    const businessSnapshot = updatedInvoice.businessSnapshot as any || {
+    // Preserve the original invoice header and snapshots
+    const partySnapshot = invoice.partySnapshot as any;
+    const businessSnapshot = invoice.businessSnapshot as any || {
       businessName: "SEETARAM ENTERPRISE",
       businessAddress: "Shop no.04, Dave Chawl, Near Kamu, Baba, SV Road, Opp. Patker College, Goregaon West, Mumbai 400104",
       businessContact: "+91 9892796228",
@@ -107,14 +131,15 @@ export async function POST(
     let billingPartyName = "";
     if (partySnapshot?.officialInvoiceName) {
       billingPartyName = partySnapshot.officialInvoiceName;
-    } else if (pNames.length > 0) {
-      billingPartyName = pNames[0];
+    } else if (invoice.billingPartyNames?.length > 0) {
+      billingPartyName = invoice.billingPartyNames[0];
     }
 
+    // Generate Excel using the snapshot entries and preserved parameters
     const buffer = await generateBillingExcel({
       entries,
-      billNo: updatedInvoice.billNo || "",
-      invoiceDate: updatedInvoice.invoiceDate,
+      billNo: invoice.billNo,
+      invoiceDate: invoice.invoiceDate,
       businessSnapshot,
       partySnapshot,
       billingPartyName
@@ -127,22 +152,22 @@ export async function POST(
       role: sessionUser.role || "Staff",
       action: "INVOICE_REGENERATED",
       entity: "Invoice",
-      entityId: updatedInvoice.id,
-      newValue: JSON.stringify({ billNo: updatedInvoice.billNo, entriesCount: entries.length, netAmount }),
+      entityId: invoice.id,
+      newValue: JSON.stringify({ billNo: invoice.billNo, entriesCount: entries.length, netAmount: invoice.netAmount }),
       req
     });
 
     // Format fileName as `<party name> <bill no>.xlsx`
     const cleanPartyName = (billingPartyName || "Tax_Invoice").replace(/[/\\?%*:|"<>]/g, "").trim();
-    const cleanBillNo = (updatedInvoice.billNo || "").toString().replace(/[/\\?%*:|"<>]/g, "").trim();
+    const cleanBillNo = invoice.billNo.toString().replace(/[/\\?%*:|"<>]/g, "").trim();
     const fileName = cleanBillNo ? `${cleanPartyName} ${cleanBillNo}.xlsx` : `${cleanPartyName}.xlsx`;
 
     return NextResponse.json({
       success: true,
       data: {
         message: "Bill regenerated successfully",
-        billNo: updatedInvoice.billNo || "",
-        invoiceId: updatedInvoice.id,
+        billNo: invoice.billNo,
+        invoiceId: invoice.id,
         fileBase64: buffer.toString('base64'),
         fileName
       }

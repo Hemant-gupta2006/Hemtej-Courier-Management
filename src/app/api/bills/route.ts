@@ -199,7 +199,26 @@ export async function POST(req: Request) {
     });
     const calculatedInvoiceDate = calculateGstBillDate(resolvedMonth, resolvedYear);
 
-    // Save the Invoice with generation parameters
+    const entryIds = entries.map((e: any) => e.id);
+    const entriesSnapshot = entries.map((e: any) => ({
+      id: e.id,
+      challanNo: e.challanNo,
+      date: e.date,
+      fromParty: e.fromParty,
+      toParty: e.toParty,
+      destination: e.destination,
+      amount: e.amount || 0,
+      weightValue: e.weightValue || 0,
+      weightUnit: e.weightUnit || "gm",
+      status: e.status || "Account",
+      mode: e.mode || "Surface",
+    }));
+
+    const effectivePartyNames = pNames.length > 0
+      ? pNames
+      : (billingPartyName ? [billingPartyName.trim()] : []);
+
+    // Save the Invoice with generation parameters and immutable snapshot
     const newInvoice = await prisma.invoice.create({
       data: {
         userId,
@@ -207,10 +226,12 @@ export async function POST(req: Request) {
         invoiceDate: calculatedInvoiceDate,
         billingFromDate: startDate ? new Date(startDate) : null,
         billingToDate: endDate ? new Date(endDate) : null,
-        billingPartyNames: pNames,
+        billingPartyNames: effectivePartyNames,
         partyId: resolvedPartyId || null,
         partySnapshot,
         businessSnapshot,
+        entryIds,
+        entriesSnapshot,
         entriesCount: entries.length,
         grossAmount,
         cgst,
