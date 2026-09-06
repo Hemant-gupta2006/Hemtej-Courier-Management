@@ -124,32 +124,40 @@ async function main() {
   
   for (const user of users) {
     const userId = user.id;
+    let createdCount = 0;
+    let skippedCount = 0;
+
     for (const party of initialParties) {
-      await prisma.billingParty.upsert({
+      // Check if this party already exists for this user:
+      // Match by officialInvoiceName, GST number, or if the name exists in aliases
+      const existing = await prisma.billingParty.findFirst({
         where: {
-          userId_officialInvoiceName: {
-            userId,
-            officialInvoiceName: party.officialInvoiceName,
-          }
+          userId,
+          OR: [
+            { officialInvoiceName: { equals: party.officialInvoiceName, mode: "insensitive" as const } },
+            ...(party.gstNumber ? [{ gstNumber: { equals: party.gstNumber, mode: "insensitive" as const } }] : []),
+            { aliases: { has: party.officialInvoiceName } },
+          ],
         },
-        update: {
-          addressLine1: party.addressLine1,
-          addressLine2: party.addressLine2,
-          city: party.city,
-          state: party.state,
-          pincode: party.pincode,
-          contactNumber: party.contactNumber,
-          gstNumber: party.gstNumber,
-        },
-        create: {
+      });
+
+      if (existing) {
+        // Party already exists (or was renamed/customized by user). Do NOT overwrite or duplicate.
+        skippedCount++;
+        continue;
+      }
+
+      await prisma.billingParty.create({
+        data: {
           ...party,
           userId,
-        }
+        },
       });
+      createdCount++;
     }
-  }
 
-  console.log(`Seeded/Updated parties for ${users.length} users.`);
+    console.log(`User ${user.email || user.name || userId}: ${createdCount} created, ${skippedCount} preserved.`);
+  }
 }
 
 main().catch(console.error).finally(() => prisma.$disconnect());

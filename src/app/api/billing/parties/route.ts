@@ -6,41 +6,73 @@ import { authOptions } from "@/lib/auth";
 export async function GET(req: Request) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session) return new NextResponse("Unauthorized", { status: 401 });
+    if (!session || !session.user || !(session.user as any).id) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
 
+    const userId = (session.user as any).id;
     const { searchParams } = new URL(req.url);
-    const search = searchParams.get("search") || "";
+    const search = searchParams.get("search")?.trim() || "";
+    const all = searchParams.get("all") === "true";
+    const includeArchived = searchParams.get("includeArchived") === "true";
+    const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10) || 1);
+    const pageSize = Math.max(1, Math.min(100, parseInt(searchParams.get("pageSize") || "10", 10) || 10));
 
     const where: any = {
-      userId: (session.user as any).id,
-      isArchived: false,
+      userId,
     };
+
+    if (!includeArchived) {
+      where.isArchived = false;
+    }
 
     if (search) {
       where.OR = [
         { officialInvoiceName: { contains: search, mode: "insensitive" } },
         { aliases: { hasSome: [search] } },
         { gstNumber: { contains: search, mode: "insensitive" } },
+        { contactNumber: { contains: search, mode: "insensitive" } },
+        { city: { contains: search, mode: "insensitive" } },
       ];
     }
+
+    const total = await prisma.billingParty.count({ where });
 
     const parties = await prisma.billingParty.findMany({
       where,
       orderBy: { officialInvoiceName: "asc" },
-      take: 50, // Limit results
+      include: {
+        _count: {
+          select: { invoices: true },
+        },
+      },
+      ...(all ? {} : { skip: (page - 1) * pageSize, take: pageSize }),
     });
 
-    return NextResponse.json({ success: true, data: parties });
+    return NextResponse.json({
+      success: true,
+      data: {
+        parties,
+        pagination: {
+          page: all ? 1 : page,
+          pageSize: all ? total : pageSize,
+          total,
+          totalPages: all ? 1 : Math.ceil(total / pageSize) || 1,
+        },
+      },
+    });
   } catch (error) {
     console.error("[BILLING_PARTIES_GET]", error);
-    return new NextResponse("Internal Server Error", { status: 500 });
+    return NextResponse.json({ success: false, error: "Internal Server Error" }, { status: 500 });
   }
 }
 
 export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session) return new NextResponse("Unauthorized", { status: 401 });
+    if (!session || !session.user || !(session.user as any).id) {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    }
 
     const userId = (session.user as any).id;
     const body = await req.json();
@@ -57,16 +89,17 @@ export async function POST(req: Request) {
       gstNumber,
     } = body;
 
-    if (!officialInvoiceName) {
-      return new NextResponse("Official Invoice Name is required", { status: 400 });
+    const trimmedName = (officialInvoiceName || "").trim();
+    if (!trimmedName) {
+      return NextResponse.json({ success: false, error: "Official Invoice Name is required" }, { status: 400 });
     }
 
-    // Check for duplicates
+    // Check for duplicate official invoice name for this user
     const existing = await prisma.billingParty.findFirst({
       where: {
         userId,
-        officialInvoiceName: { equals: officialInvoiceName, mode: 'insensitive' },
-      }
+        officialInvoiceName: { equals: trimmedName, mode: "insensitive" },
+      },
     });
 
     if (existing) {
@@ -76,12 +109,14 @@ export async function POST(req: Request) {
       );
     }
 
-    if (gstNumber) {
+    // Check for duplicate GST number if provided
+    const trimmedGst = (gstNumber || "").trim().toUpperCase();
+    if (trimmedGst) {
       const existingGst = await prisma.billingParty.findFirst({
         where: {
           userId,
-          gstNumber: { equals: gstNumber, mode: 'insensitive' }
-        }
+          gstNumber: { equals: trimmedGst, mode: "insensitive" },
+        },
       });
       if (existingGst) {
         return NextResponse.json(
@@ -91,24 +126,40 @@ export async function POST(req: Request) {
       }
     }
 
+    // Prepare aliases
+    let cleanAliases: string[] = [];
+    if (Array.isArray(aliases)) {
+      cleanAliases = Array.from(new Set(aliases.map((a: string) => a.trim()).filter(Boolean)));
+    } else if (typeof aliases === "string" && aliases.trim()) {
+      cleanAliases = Array.from(new Set(aliases.split(",").map((a: string) => a.trim()).filter(Boolean)));
+    }
+    if (cleanAliases.length === 0) {
+      cleanAliases = [trimmedName];
+    }
+
     const newParty = await prisma.billingParty.create({
       data: {
         userId,
-        officialInvoiceName,
-        aliases: aliases || [officialInvoiceName],
-        addressLine1,
-        addressLine2,
-        city,
-        state,
-        pincode,
-        contactNumber,
-        gstNumber,
-      }
+        officialInvoiceName: trimmedName,
+        aliases: cleanAliases,
+        addressLine1: addressLine1?.trim() || null,
+        addressLine2: addressLine2?.trim() || null,
+        city: city?.trim() || null,
+        state: state?.trim() || null,
+        pincode: pincode?.trim() || null,
+        contactNumber: contactNumber?.trim() || null,
+        gstNumber: trimmedGst || null,
+      },
+      include: {
+        _count: {
+          select: { invoices: true },
+        },
+      },
     });
 
     return NextResponse.json({ success: true, data: newParty });
   } catch (error) {
     console.error("[BILLING_PARTIES_POST]", error);
-    return new NextResponse("Internal Server Error", { status: 500 });
+    return NextResponse.json({ success: false, error: "Internal Server Error" }, { status: 500 });
   }
 }

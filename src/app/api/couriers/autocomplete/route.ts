@@ -56,9 +56,62 @@ export async function GET() {
       orderBy: { createdAt: 'desc' }
     });
 
-    const destinations = processSuggestions(couriers.map(c => c.destination));
-    const fromParties = processSuggestions(couriers.map(c => c.fromParty));
-    const toParties = processSuggestions(couriers.map(c => c.toParty));
+    // Fetch user's excluded suggestions (permanently removed from directory)
+    const excludedLogs = await prisma.auditLog.findMany({
+      where: {
+        action: "EXCLUDED_SUGGESTION",
+        oldValue: userId,
+      },
+      select: {
+        entity: true,
+        entityId: true,
+      },
+    });
+
+    const excludedFrom = new Set<string>();
+    const excludedTo = new Set<string>();
+    const excludedDest = new Set<string>();
+    const excludedAll = new Set<string>();
+
+    for (const log of excludedLogs) {
+      const val = (log.entityId || "").toLowerCase().trim();
+      if (!val) continue;
+      if (log.entity === "fromParty") excludedFrom.add(val);
+      else if (log.entity === "toParty") excludedTo.add(val);
+      else if (log.entity === "destination") excludedDest.add(val);
+      else excludedAll.add(val);
+    }
+
+    const destinations = processSuggestions(
+      couriers
+        .map(c => c.destination)
+        .filter(d => {
+          if (!d) return false;
+          const lower = d.toLowerCase().trim();
+          return !excludedDest.has(lower) && !excludedAll.has(lower);
+        })
+    );
+
+    const fromParties = processSuggestions(
+      couriers
+        .map(c => c.fromParty)
+        .filter(f => {
+          if (!f) return false;
+          const lower = f.toLowerCase().trim();
+          return !excludedFrom.has(lower) && !excludedAll.has(lower);
+        })
+    );
+
+    const toParties = processSuggestions(
+      couriers
+        .map(c => c.toParty)
+        .filter(t => {
+          if (!t) return false;
+          const lower = t.toLowerCase().trim();
+          return !excludedTo.has(lower) && !excludedAll.has(lower);
+        })
+    );
+
     const weights = processSuggestions(couriers.map(c => formatWeight(c.weightValue, c.weightUnit)));
     const statuses = processSuggestions(couriers.map(c => c.status));
 

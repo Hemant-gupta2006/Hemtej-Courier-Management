@@ -94,6 +94,9 @@ model CourierEntry {
   invoice     Invoice?         @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
 
   @@unique([challanNo, userId])
+  @@index([userId, fromParty])
+  @@index([userId, toParty])
+  @@index([userId, destination])
 }
 
 model CourierRegister {
@@ -136,6 +139,8 @@ model AuditLog {
   oldValue  String?
   newValue  String?
   timestamp DateTime @default(now())
+
+  @@index([oldValue, action])
 }
 
 model BillingParty {
@@ -158,6 +163,7 @@ model BillingParty {
   invoices            Invoice[]
 
   @@unique([userId, officialInvoiceName])
+  @@index([userId])
 }
 
 model Invoice {

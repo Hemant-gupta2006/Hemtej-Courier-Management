@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,6 +28,22 @@ export function PartyFormModal({ isOpen, onClose, onSave, initialData }: PartyFo
     contactNumber: initialData?.contactNumber || "",
     gstNumber: initialData?.gstNumber || "",
   });
+
+  useEffect(() => {
+    if (isOpen) {
+      setFormData({
+        officialInvoiceName: initialData?.officialInvoiceName || "",
+        aliases: initialData?.aliases ? initialData.aliases.join(", ") : "",
+        addressLine1: initialData?.addressLine1 || "",
+        addressLine2: initialData?.addressLine2 || "",
+        city: initialData?.city || "",
+        state: initialData?.state || "",
+        pincode: initialData?.pincode || "",
+        contactNumber: initialData?.contactNumber || "",
+        gstNumber: initialData?.gstNumber || "",
+      });
+    }
+  }, [isOpen, initialData]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });

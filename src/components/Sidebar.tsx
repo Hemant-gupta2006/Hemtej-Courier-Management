@@ -18,6 +18,8 @@ import {
   Archive,
   FolderClosed,
   Merge,
+  Building2,
+  Sparkles,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRegisters } from "@/context/RegisterContext";
@@ -53,6 +55,18 @@ const baseRoutes = [
     icon: List,
     href: "/dashboard/bills",
     color: "from-fuchsia-500 to-pink-500",
+  },
+  {
+    label: "Billing Parties",
+    icon: Building2,
+    href: "/dashboard/parties",
+    color: "from-purple-500 to-indigo-500",
+  },
+  {
+    label: "Auto Complete Suggestions",
+    icon: Sparkles,
+    href: "/dashboard/autocomplete",
+    color: "from-amber-500 to-pink-500",
   },
   {
     label: "Settings",
