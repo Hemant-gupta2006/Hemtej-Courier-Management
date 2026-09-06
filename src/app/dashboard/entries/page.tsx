@@ -21,6 +21,7 @@ import { getAutocompleteData } from "@/lib/autocomplete";
 import { formatWeight } from "@/lib/utils";
 import { useRegisters, Register } from "@/context/RegisterContext";
 import { RegisterFilterPopover, RegisterFilters, DEFAULT_REGISTER_FILTERS, FilterOptions } from "@/components/RegisterFilterPopover";
+import { MobileSortPopover } from "@/components/MobileSortPopover";
 
 // Status Colors
 const registerStatusColors: Record<string, string> = {
@@ -418,6 +419,11 @@ function CourierEntryPageInner() {
     setCurrentPage(1);
   }, []);
 
+  const handleResetSort = useCallback(() => {
+    setSorting({ column: "srNo", direction: "desc" });
+    setCurrentPage(1);
+  }, []);
+
   // Update canonical entries on row save/delete
   const handleEntrySaved = useCallback((savedEntry: any, isEdit: boolean) => {
     setEntries((prev) => {
@@ -720,6 +726,15 @@ function CourierEntryPageInner() {
       setCurrentPage(1);
     }
   }, [currentPage, totalPages]);
+
+  const maxRegisterSrNo = useMemo(() => {
+    let max = 0;
+    for (const e of entries) {
+      const s = Number(e.srNo);
+      if (!isNaN(s) && s > max) max = s;
+    }
+    return max;
+  }, [entries]);
 
   // ── Sync Filter Metrics with Navbar / RegisterContext ──
   useEffect(() => {
@@ -1051,6 +1066,7 @@ function CourierEntryPageInner() {
               onToggleSort={handleToggleSort}
               onExportExcel={handleExportExcel}
               activeRegister={activeRegister}
+              maxRegisterSrNo={maxRegisterSrNo}
               onEntrySaved={handleEntrySaved}
               onEntryDeleted={handleEntryDeleted}
             />
@@ -1059,29 +1075,32 @@ function CourierEntryPageInner() {
 
         {/* Mobile: card list + floating form */}
         {isMobile && (
-          <div className="flex-1 overflow-y-auto space-y-3 pb-24">
+          <div className="flex-1 overflow-y-auto space-y-3 pb-28">
             {/* Mobile Search & Filter Toolbar */}
             <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                  <Input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => handleSearchChange(e.target.value)}
-                    placeholder="Search all entries..."
-                    className="h-9 pl-9 pr-8 text-xs rounded-xl bg-white/50 dark:bg-slate-900/50 border-white/50 dark:border-white/10"
-                  />
-                  {searchQuery && (
-                    <button
-                      onClick={() => handleSearchChange("")}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  )}
-                </div>
+              {/* Row 1: Full-width search bar */}
+              <div className="relative w-full">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
+                <Input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => handleSearchChange(e.target.value)}
+                  placeholder="Search all entries in this register..."
+                  className="h-10 pl-9 pr-9 text-xs rounded-xl bg-white/50 dark:bg-slate-900/50 border-white/50 dark:border-white/10 shadow-sm"
+                />
+                {searchQuery && (
+                  <button
+                    onClick={() => handleSearchChange("")}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1"
+                    title="Clear search"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
 
+              {/* Row 2: Action Controls: Filters, Sort, Export */}
+              <div className="flex items-center gap-2">
                 <RegisterFilterPopover
                   filters={filters}
                   onChange={handleFiltersChange}
@@ -1089,14 +1108,21 @@ function CourierEntryPageInner() {
                   activeCount={activeFilterCount}
                 />
 
+                <MobileSortPopover
+                  currentSort={sorting}
+                  onToggleSort={handleToggleSort}
+                  onResetSort={handleResetSort}
+                />
+
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={handleExportExcel}
                   title="Export filtered entries"
-                  className="h-9 px-2.5 rounded-xl border-white/50 dark:border-white/10 bg-white/40 dark:bg-slate-900/40 text-xs font-semibold text-slate-700 dark:text-slate-300"
+                  className="h-9 px-3 rounded-xl border-white/50 dark:border-white/10 bg-white/40 dark:bg-slate-900/40 text-xs font-semibold text-slate-700 dark:text-slate-300 gap-1.5 ml-auto shadow-sm"
                 >
                   <Download className="h-3.5 w-3.5" />
+                  <span>Export</span>
                 </Button>
               </div>
 

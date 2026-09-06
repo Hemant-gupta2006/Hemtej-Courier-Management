@@ -85,6 +85,7 @@ interface DataTableProps<TData, TValue> {
   onClearAll?: () => void;
   onExportExcel?: () => void;
   activeRegister?: any;
+  maxRegisterSrNo?: number;
   onEntrySaved?: (savedEntry: any, isEdit: boolean) => void;
   onEntryDeleted?: (deletedId: string) => void;
 }
@@ -213,6 +214,7 @@ export function DataTable<TData, TValue>({
   onClearAll,
   onExportExcel,
   activeRegister,
+  maxRegisterSrNo,
   onEntrySaved,
   onEntryDeleted,
 }: DataTableProps<TData, TValue>) {
@@ -392,6 +394,19 @@ export function DataTable<TData, TValue>({
     return nextChallanRef.current || 1001;
   }, []);
 
+  const getNextSrNo = useCallback((d: LocalRow[]): number => {
+    let max = 0;
+    if (d && d.length > 0) {
+      for (const r of d) {
+        const num = Number(r.srNo);
+        if (!isNaN(num) && num > max) {
+          max = num;
+        }
+      }
+    }
+    return max > 0 ? max + 1 : 1;
+  }, []);
+
   const addEmptyRow = useCallback(async (): Promise<string | null> => {
     if (activeRegister?.status === "Locked" || activeRegister?.status === "Archived") {
       toast.error(`Cannot add entries to a ${activeRegister.status.toLowerCase()} register.`);
@@ -405,6 +420,9 @@ export function DataTable<TData, TValue>({
     }
 
     const nextChallan = getNextChallan(dataRef.current);
+    const nextSrNo = (maxRegisterSrNo && maxRegisterSrNo > 0)
+      ? maxRegisterSrNo + 1
+      : getNextSrNo(dataRef.current);
     const tempId = `temp-${Date.now()}`;
     let rowDate = new Date().toISOString().split("T")[0];
     if (activeRegister) {
@@ -421,6 +439,7 @@ export function DataTable<TData, TValue>({
     const newRow: LocalRow = {
       id: tempId,
       tempId,
+      srNo: nextSrNo,
       date: batchDefaults.date || rowDate,
       challanNo: nextChallan,
       fromParty: useBatchDefaults ? batchDefaults.fromParty : "",
@@ -435,9 +454,13 @@ export function DataTable<TData, TValue>({
       registerId: activeRegister?.id || null,
     };
 
+    if (onPageChange && pageIndex !== 0) {
+      onPageChange(1);
+    }
+
     setData((prev) => [newRow, ...prev]);
     return tempId;
-  }, [useBatchDefaults, batchDefaults, activeRegister, getNextChallan]);
+  }, [useBatchDefaults, batchDefaults, activeRegister, getNextChallan, maxRegisterSrNo, getNextSrNo, onPageChange, pageIndex]);
 
   const updateData = useCallback(
     (identifier: string, columnId: string, value: unknown) => {
@@ -647,9 +670,12 @@ export function DataTable<TData, TValue>({
             }
           }
 
+          const freshSrNo = targetRow.srNo ? Number(targetRow.srNo) + 1 : ((maxRegisterSrNo || 0) + 1);
+
           const freshRow: LocalRow = {
             id: nextTempId,
             tempId: nextTempId,
+            srNo: freshSrNo,
             date: batchDefaults.date || rowDate,
             challanNo: predictedChallan,
             fromParty: useBatchDefaults ? batchDefaults.fromParty : "",
@@ -1243,18 +1269,11 @@ export function DataTable<TData, TValue>({
       ? totalSize - virtualItems[virtualItems.length - 1].end
       : 0;
 
-  const tableHeight = useMemo(() => {
-    if (mode === "entry") {
-      return "calc(100vh - 145px)";
-    }
-    return "calc(100vh - 210px)";
-  }, [mode]);
-
   return (
-    <div className="w-full space-y-1.5">
+    <div className="w-full flex-1 min-h-0 flex flex-col overflow-hidden space-y-2">
       {/* Entry mode: Single consolidated card containing Default Date, Search, Filters, Import, Export, and Add Courier */}
       {mode !== "all" && (
-        <div className="space-y-2">
+        <div className="space-y-2 shrink-0">
           <div className="rounded-[14px] bg-white/40 dark:bg-slate-900/40 backdrop-blur-3xl border border-white/50 dark:border-white/10 shadow-sm px-3 py-1.5 flex flex-wrap items-center justify-between gap-2.5">
             {/* Left section: Default Date, Search, Filters */}
             <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[280px]">
@@ -1305,6 +1324,77 @@ export function DataTable<TData, TValue>({
                   activeCount={activeFilterCount || 0}
                 />
               )}
+
+              {/* Active Filter Chips — Positioned inline beside Filters button in document flow */}
+              {((activeFilterCount && activeFilterCount > 0) || Boolean(searchValue?.trim())) && filters && onFiltersChange && (
+                <div className="flex flex-wrap items-center gap-1.5 py-0.5">
+                  {searchValue?.trim() && (
+                    <div className="flex items-center gap-1 px-2.5 py-0.5 bg-blue-500/15 border border-blue-500/30 text-blue-300 rounded-full text-[11px] font-medium">
+                      <span>Search: "{searchValue}"</span>
+                      <button onClick={() => onSearchChange?.("")} className="hover:text-white p-0.5" title="Clear search"><X className="w-3 h-3" /></button>
+                    </div>
+                  )}
+
+                  {filters.dateType === "exact" && filters.exactDate && (
+                    <div className="flex items-center gap-1 px-2.5 py-0.5 bg-blue-500/15 border border-blue-500/30 text-blue-300 rounded-full text-[11px] font-medium">
+                      <span>Date: {filters.exactDate}</span>
+                      <button onClick={() => onFiltersChange({ ...filters, dateType: "all", exactDate: "" })} className="hover:text-white p-0.5" title="Remove date filter"><X className="w-3 h-3" /></button>
+                    </div>
+                  )}
+
+                  {filters.dateType === "range" && (filters.startDate || filters.endDate) && (
+                    <div className="flex items-center gap-1 px-2.5 py-0.5 bg-blue-500/15 border border-blue-500/30 text-blue-300 rounded-full text-[11px] font-medium">
+                      <span>Date: {filters.startDate || "Start"} to {filters.endDate || "End"}</span>
+                      <button onClick={() => onFiltersChange({ ...filters, dateType: "all", startDate: "", endDate: "" })} className="hover:text-white p-0.5" title="Remove date range"><X className="w-3 h-3" /></button>
+                    </div>
+                  )}
+
+                  {filters.fromParties.map((p) => (
+                    <div key={`from-${p}`} className="flex items-center gap-1 px-2.5 py-0.5 bg-purple-500/15 border border-purple-500/30 text-purple-300 rounded-full text-[11px] font-medium">
+                      <span>From: {p}</span>
+                      <button onClick={() => onFiltersChange({ ...filters, fromParties: filters.fromParties.filter(i => i !== p) })} className="hover:text-white p-0.5" title={`Remove From: ${p}`}><X className="w-3 h-3" /></button>
+                    </div>
+                  ))}
+
+                  {filters.toParties.map((p) => (
+                    <div key={`to-${p}`} className="flex items-center gap-1 px-2.5 py-0.5 bg-purple-500/15 border border-purple-500/30 text-purple-300 rounded-full text-[11px] font-medium">
+                      <span>To: {p}</span>
+                      <button onClick={() => onFiltersChange({ ...filters, toParties: filters.toParties.filter(i => i !== p) })} className="hover:text-white p-0.5" title={`Remove To: ${p}`}><X className="w-3 h-3" /></button>
+                    </div>
+                  ))}
+
+                  {filters.destinations.map((d) => (
+                    <div key={`dest-${d}`} className="flex items-center gap-1 px-2.5 py-0.5 bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 rounded-full text-[11px] font-medium">
+                      <span>Dest: {d}</span>
+                      <button onClick={() => onFiltersChange({ ...filters, destinations: filters.destinations.filter(i => i !== d) })} className="hover:text-white p-0.5" title={`Remove Destination: ${d}`}><X className="w-3 h-3" /></button>
+                    </div>
+                  ))}
+
+                  {filters.statuses.map((s) => (
+                    <div key={`st-${s}`} className="flex items-center gap-1 px-2.5 py-0.5 bg-amber-500/15 border border-amber-500/30 text-amber-300 rounded-full text-[11px] font-medium">
+                      <span>Status: {s}</span>
+                      <button onClick={() => onFiltersChange({ ...filters, statuses: filters.statuses.filter(i => i !== s) })} className="hover:text-white p-0.5" title={`Remove Status: ${s}`}><X className="w-3 h-3" /></button>
+                    </div>
+                  ))}
+
+                  {filters.modes.map((m) => (
+                    <div key={`mode-${m}`} className="flex items-center gap-1 px-2.5 py-0.5 bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 rounded-full text-[11px] font-medium">
+                      <span>Mode: {m}</span>
+                      <button onClick={() => onFiltersChange({ ...filters, modes: filters.modes.filter(i => i !== m) })} className="hover:text-white p-0.5" title={`Remove Mode: ${m}`}><X className="w-3 h-3" /></button>
+                    </div>
+                  ))}
+
+                  <button
+                    onClick={() => {
+                      onSearchChange?.("");
+                      onFiltersChange(DEFAULT_REGISTER_FILTERS);
+                    }}
+                    className="text-[11px] font-semibold text-red-400 hover:text-red-300 hover:underline px-1.5 py-0.5 transition-colors"
+                  >
+                    Clear All
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Right section: Import, Export, Add Courier */}
@@ -1350,79 +1440,6 @@ export function DataTable<TData, TValue>({
               </Button>
             </div>
           </div>
-
-          {/* Active Filter Chips */}
-          {((activeFilterCount && activeFilterCount > 0) || Boolean(searchValue?.trim())) && filters && onFiltersChange && (
-            <div className="flex flex-wrap items-center gap-1.5 px-3 py-1.5 bg-slate-900/60 rounded-xl border border-white/10 text-xs">
-              <span className="text-[11px] font-semibold text-slate-400 mr-1">Active Filters:</span>
-
-              {searchValue?.trim() && (
-                <div className="flex items-center gap-1 px-2.5 py-0.5 bg-blue-500/15 border border-blue-500/30 text-blue-300 rounded-full text-[11px] font-medium">
-                  <span>Search: "{searchValue}"</span>
-                  <button onClick={() => onSearchChange?.("")} className="hover:text-white p-0.5"><X className="w-3 h-3" /></button>
-                </div>
-              )}
-
-              {filters.dateType === "exact" && filters.exactDate && (
-                <div className="flex items-center gap-1 px-2.5 py-0.5 bg-blue-500/15 border border-blue-500/30 text-blue-300 rounded-full text-[11px] font-medium">
-                  <span>Date: {filters.exactDate}</span>
-                  <button onClick={() => onFiltersChange({ ...filters, dateType: "all", exactDate: "" })} className="hover:text-white p-0.5"><X className="w-3 h-3" /></button>
-                </div>
-              )}
-
-              {filters.dateType === "range" && (filters.startDate || filters.endDate) && (
-                <div className="flex items-center gap-1 px-2.5 py-0.5 bg-blue-500/15 border border-blue-500/30 text-blue-300 rounded-full text-[11px] font-medium">
-                  <span>Date: {filters.startDate || "Start"} to {filters.endDate || "End"}</span>
-                  <button onClick={() => onFiltersChange({ ...filters, dateType: "all", startDate: "", endDate: "" })} className="hover:text-white p-0.5"><X className="w-3 h-3" /></button>
-                </div>
-              )}
-
-              {filters.fromParties.map((p) => (
-                <div key={`from-${p}`} className="flex items-center gap-1 px-2.5 py-0.5 bg-purple-500/15 border border-purple-500/30 text-purple-300 rounded-full text-[11px] font-medium">
-                  <span>From: {p}</span>
-                  <button onClick={() => onFiltersChange({ ...filters, fromParties: filters.fromParties.filter(i => i !== p) })} className="hover:text-white p-0.5"><X className="w-3 h-3" /></button>
-                </div>
-              ))}
-
-              {filters.toParties.map((p) => (
-                <div key={`to-${p}`} className="flex items-center gap-1 px-2.5 py-0.5 bg-purple-500/15 border border-purple-500/30 text-purple-300 rounded-full text-[11px] font-medium">
-                  <span>To: {p}</span>
-                  <button onClick={() => onFiltersChange({ ...filters, toParties: filters.toParties.filter(i => i !== p) })} className="hover:text-white p-0.5"><X className="w-3 h-3" /></button>
-                </div>
-              ))}
-
-              {filters.destinations.map((d) => (
-                <div key={`dest-${d}`} className="flex items-center gap-1 px-2.5 py-0.5 bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 rounded-full text-[11px] font-medium">
-                  <span>Dest: {d}</span>
-                  <button onClick={() => onFiltersChange({ ...filters, destinations: filters.destinations.filter(i => i !== d) })} className="hover:text-white p-0.5"><X className="w-3 h-3" /></button>
-                </div>
-              ))}
-
-              {filters.statuses.map((s) => (
-                <div key={`st-${s}`} className="flex items-center gap-1 px-2.5 py-0.5 bg-amber-500/15 border border-amber-500/30 text-amber-300 rounded-full text-[11px] font-medium">
-                  <span>Status: {s}</span>
-                  <button onClick={() => onFiltersChange({ ...filters, statuses: filters.statuses.filter(i => i !== s) })} className="hover:text-white p-0.5"><X className="w-3 h-3" /></button>
-                </div>
-              ))}
-
-              {filters.modes.map((m) => (
-                <div key={`mode-${m}`} className="flex items-center gap-1 px-2.5 py-0.5 bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 rounded-full text-[11px] font-medium">
-                  <span>Mode: {m}</span>
-                  <button onClick={() => onFiltersChange({ ...filters, modes: filters.modes.filter(i => i !== m) })} className="hover:text-white p-0.5"><X className="w-3 h-3" /></button>
-                </div>
-              ))}
-
-              <button
-                onClick={() => {
-                  onSearchChange?.("");
-                  onFiltersChange(DEFAULT_REGISTER_FILTERS);
-                }}
-                className="text-[11px] font-semibold text-red-400 hover:text-red-300 hover:underline px-2 py-0.5 transition-colors ml-auto"
-              >
-                Clear Filters
-              </button>
-            </div>
-          )}
         </div>
       )}
 
@@ -1490,11 +1507,10 @@ export function DataTable<TData, TValue>({
       )}
 
       {/* Table */}
-      <div className="rounded-none overflow-hidden bg-slate-900/40 backdrop-blur-xl border border-white/10 shadow-lg scrollbar-thin scrollbar-thumb-slate-700/50 scrollbar-track-transparent flex flex-col">
+      <div className="flex-1 min-h-0 rounded-xl overflow-hidden bg-slate-900/40 backdrop-blur-xl border border-white/10 shadow-lg flex flex-col">
         <div
           ref={parentRef}
-          className="overflow-auto scrollbar-thin scrollbar-thumb-slate-700/50 scrollbar-track-transparent flex-1"
-          style={{ height: tableHeight, maxHeight: tableHeight, overflowY: "auto" }}
+          className="overflow-auto scrollbar-thin scrollbar-thumb-slate-700/50 scrollbar-track-transparent flex-1 min-h-0"
         >
           <Table className="w-full min-w-[1000px] table-fixed border-collapse">
             <TableHeader className="bg-white/5 dark:bg-slate-800/40 sticky top-0 z-10 backdrop-blur-md">
@@ -1572,7 +1588,7 @@ export function DataTable<TData, TValue>({
 
       {/* Pagination Footer */}
       {onPageChange && (
-        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 bg-white/40 dark:bg-slate-900/40 backdrop-blur-xl border border-white/50 dark:border-white/10 rounded-2xl text-xs text-slate-600 dark:text-slate-400 shadow-sm mt-3 shrink-0">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 bg-white/40 dark:bg-slate-900/40 backdrop-blur-xl border border-white/50 dark:border-white/10 rounded-2xl text-xs text-slate-600 dark:text-slate-400 shadow-sm shrink-0">
           <div className="flex items-center gap-2">
             {filteredCount !== undefined && totalCount !== undefined && filteredCount !== totalCount ? (
               <span>

@@ -449,12 +449,9 @@ export const columns: ColumnDef<CourierEntry>[] = [
     accessorKey: "srNo",
     header: ({ table }) => <SortableHeader title="Sr.No" columnId="srNo" table={table} />,
     size: 55,
-    cell: ({ row, table }) => {
-      const meta = table.options.meta as any;
-      const pageIndex = meta?.pageIndex ?? 0;
-      const pageSize = meta?.pageSize ?? 50;
-      const sortedIndex = table.getRowModel().rows.findIndex(r => r.id === row.id);
-      const displayNo = pageIndex * pageSize + (sortedIndex >= 0 ? sortedIndex : row.index) + 1;
+    cell: ({ row }) => {
+      const srNo = (row.original as any).srNo ?? row.getValue("srNo");
+      const displayNo = srNo != null && !isNaN(Number(srNo)) ? srNo : "-";
 
       return (
         <div className="h-10 w-full flex items-center px-1 text-sm text-slate-300 truncate overflow-hidden whitespace-nowrap">

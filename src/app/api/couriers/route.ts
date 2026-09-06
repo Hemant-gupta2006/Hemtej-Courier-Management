@@ -278,7 +278,7 @@ export async function POST(req: Request) {
           }
 
           const maxSrNoResult = await tx.courierEntry.aggregate({
-            where: { userId },
+            where: finalRegisterId ? { userId, registerId: finalRegisterId } : { userId },
             _max: { srNo: true }
           });
           const newSrNo = (maxSrNoResult._max.srNo || 0) + 1;

@@ -14,8 +14,10 @@ function MainContent({ children }: { children: React.ReactNode }) {
 
   return (
     <div
-      className={`flex-1 overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-800 ${
-        isRegisterView ? "px-2 py-1.5 sm:px-3 sm:py-1.5" : "px-3 py-3 sm:px-4 sm:py-4"
+      className={`flex-1 min-h-0 ${
+        isRegisterView
+          ? "flex flex-col h-full overflow-hidden px-2 py-1.5 sm:px-3 sm:py-1.5"
+          : "overflow-y-auto overflow-x-hidden px-3 py-3 sm:px-4 sm:py-4 scrollbar-thin scrollbar-thumb-slate-200 dark:scrollbar-thumb-slate-800"
       }`}
     >
       {children}

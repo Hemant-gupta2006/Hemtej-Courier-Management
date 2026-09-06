@@ -102,6 +102,19 @@ export async function POST(req: Request) {
         throw new Error(`Integrity Error: Expected to move ${expectedEntryCount} entries, but moved ${updateResult.count}. Rolling back.`);
       }
 
+      // 4.5 Resequence srNo sequentially (1..N) chronologically in the new combined register
+      await tx.$executeRaw`
+        WITH numbered AS (
+          SELECT id, ROW_NUMBER() OVER (ORDER BY date ASC, "challanNo" ASC, "createdAt" ASC) as new_sr
+          FROM "CourierEntry"
+          WHERE "registerId" = ${newRegister.id} AND "userId" = ${userId}
+        )
+        UPDATE "CourierEntry" ce
+        SET "srNo" = numbered.new_sr
+        FROM numbered
+        WHERE ce.id = numbered.id
+      `;
+
       // 5. Archive source registers
       await tx.courierRegister.updateMany({
         where: {

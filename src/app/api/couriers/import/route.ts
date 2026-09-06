@@ -102,7 +102,7 @@ export async function POST(req: Request) {
       if (Array.isArray(insertions) && insertions.length > 0) {
         // Pre-fetch the max srNo once before the loop
         const maxSrNoResult = await tx.courierEntry.aggregate({
-          where: { userId },
+          where: registerId ? { userId, registerId } : { userId },
           _max: { srNo: true }
         });
         let currentMaxSrNo = maxSrNoResult._max.srNo || 0;

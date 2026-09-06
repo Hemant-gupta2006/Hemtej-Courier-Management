@@ -24,12 +24,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: "Invalid data: items must be a non-empty array" }, { status: 400 });
     }
 
-    let maxSrNoResult = await prisma.courierEntry.aggregate({
-      where: { userId },
-      _max: { srNo: true }
-    });
-    
-    let currentSrNo = (maxSrNoResult._max.srNo || 0);
+    // Track max srNo per register
+    const registerSrNoMap = new Map<string, number>();
 
     const createdItems = [];
     for (const item of items) {
@@ -74,13 +70,21 @@ export async function POST(req: Request) {
         continue;
       }
 
-      currentSrNo++;
+      if (!registerSrNoMap.has(register.id)) {
+        const maxSrNoResult = await prisma.courierEntry.aggregate({
+          where: { userId, registerId: register.id },
+          _max: { srNo: true }
+        });
+        registerSrNoMap.set(register.id, maxSrNoResult._max.srNo || 0);
+      }
+      const itemSrNo = (registerSrNoMap.get(register.id) || 0) + 1;
+      registerSrNoMap.set(register.id, itemSrNo);
       const amount = Number(item.amount) || 0;
 
       const created = await prisma.courierEntry.create({
         data: {
           userId,
-          srNo: currentSrNo,
+          srNo: itemSrNo,
           date,
           challanNo: parsedChallan,
           fromParty: String(item.fromParty || "").trim(),
