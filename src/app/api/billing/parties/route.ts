@@ -15,6 +15,7 @@ export async function GET(req: Request) {
     const search = searchParams.get("search")?.trim() || "";
     const all = searchParams.get("all") === "true";
     const includeArchived = searchParams.get("includeArchived") === "true";
+    const hasPage = searchParams.has("page");
     const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10) || 1);
     const pageSize = Math.max(1, Math.min(100, parseInt(searchParams.get("pageSize") || "10", 10) || 10));
 
@@ -36,6 +37,25 @@ export async function GET(req: Request) {
       ];
     }
 
+    // Unpaginated request (e.g. from dropdowns, autocompletion or all=true)
+    if (!hasPage || all) {
+      const parties = await prisma.billingParty.findMany({
+        where,
+        orderBy: { officialInvoiceName: "asc" },
+        include: {
+          _count: {
+            select: { invoices: true },
+          },
+        },
+      });
+
+      return NextResponse.json({
+        success: true,
+        data: parties,
+      });
+    }
+
+    // Paginated request (e.g. from /dashboard/parties)
     const total = await prisma.billingParty.count({ where });
 
     const parties = await prisma.billingParty.findMany({
@@ -46,7 +66,8 @@ export async function GET(req: Request) {
           select: { invoices: true },
         },
       },
-      ...(all ? {} : { skip: (page - 1) * pageSize, take: pageSize }),
+      skip: (page - 1) * pageSize,
+      take: pageSize,
     });
 
     return NextResponse.json({
@@ -54,10 +75,10 @@ export async function GET(req: Request) {
       data: {
         parties,
         pagination: {
-          page: all ? 1 : page,
-          pageSize: all ? total : pageSize,
+          page,
+          pageSize,
           total,
-          totalPages: all ? 1 : Math.ceil(total / pageSize) || 1,
+          totalPages: Math.ceil(total / pageSize) || 1,
         },
       },
     });

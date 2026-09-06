@@ -131,7 +131,8 @@ export default function ReportsPage() {
       const res = await fetch("/api/billing/parties");
       const data = await res.json();
       if (data.success) {
-        setMasterParties(data.data);
+        const list = Array.isArray(data.data) ? data.data : (data.data?.parties || []);
+        setMasterParties(Array.isArray(list) ? list : []);
       }
     } catch (e) {
       console.error(e);
@@ -674,7 +675,8 @@ export default function ReportsPage() {
               </div>
               <div className="relative bg-white dark:bg-slate-950 rounded-xl" ref={partySearchRef}>
                 {(() => {
-                  const masterSuggestion = masterParties.find(p => p.officialInvoiceName.toLowerCase().startsWith(billingPartyName.toLowerCase()))?.officialInvoiceName;
+                  const partyList = Array.isArray(masterParties) ? masterParties : [];
+                  const masterSuggestion = partyList.find(p => p.officialInvoiceName.toLowerCase().startsWith(billingPartyName.toLowerCase()))?.officialInvoiceName;
                   const isSuggestionVisible = billingPartyName.length > 0 && masterSuggestion && masterSuggestion.toLowerCase().startsWith(billingPartyName.toLowerCase()) && masterSuggestion.toLowerCase() !== billingPartyName.toLowerCase();
 
                   return (
@@ -699,7 +701,7 @@ export default function ReportsPage() {
                           const isEnter = e.key === "Enter" || e.keyCode === 13;
                           if ((e.key === "Tab" || isEnter) && isSuggestionVisible) {
                             e.preventDefault();
-                            const matchingParty = masterParties.find(p => p.officialInvoiceName === masterSuggestion);
+                            const matchingParty = partyList.find(p => p.officialInvoiceName === masterSuggestion);
                             if (matchingParty) {
                               handleSelectMasterParty(matchingParty);
                             }
