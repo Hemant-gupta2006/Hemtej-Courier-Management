@@ -103,7 +103,7 @@ export async function GET(req: Request) {
 
     return new NextResponse(excelBuffer, {
       headers: {
-        "Content-Disposition": `attachment; filename="Couriers_Monthly_Export_${monthName}_${year}.xlsx"`,
+        "Content-Disposition": `attachment; filename="${monthName} ${year}.xlsx"`,
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       }
     });

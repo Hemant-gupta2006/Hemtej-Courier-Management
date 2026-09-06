@@ -5,6 +5,7 @@ import { authOptions } from "@/lib/auth";
 import ExcelJS from "exceljs";
 import { formatWeight } from "@/lib/utils";
 import { recordActivity } from "@/lib/activityLog";
+import { calculateGstBillDate, resolveBillingMonthYear } from "@/lib/billing-date";
 
 export async function GET(req: Request) {
   try {
@@ -16,10 +17,20 @@ export async function GET(req: Request) {
     const partyNames = searchParams.getAll("partyName").map(p => p.trim()).filter(Boolean);
     const startDateStr = searchParams.get("startDate");
     const endDateStr = searchParams.get("endDate");
+    const billingMonthParam = searchParams.get("billingMonth");
+    const billingYearParam = searchParams.get("billingYear");
+
+    // Resolve billing month and calculate GST bill date
+    const { billingMonth: resolvedMonth, billingYear: resolvedYear } = resolveBillingMonthYear({
+      billingMonth: billingMonthParam,
+      billingYear: billingYearParam,
+      startDate: startDateStr,
+      endDate: endDateStr
+    });
+    const calculatedInvoiceDate = calculateGstBillDate(resolvedMonth, resolvedYear);
 
     // Advanced Details
     const billNo = searchParams.get("billNo") || "";
-    const invoiceDateStr = searchParams.get("invoiceDate") || new Date().toISOString().split('T')[0];
     const partyAddress1 = searchParams.get("partyAddress1") || "";
     const partyAddress2 = searchParams.get("partyAddress2") || "";
     const partyCity = searchParams.get("partyCity") || "";
@@ -103,7 +114,7 @@ export async function GET(req: Request) {
           data: {
             userId: (session.user as any).id,
             billNo: billNo || null,
-            invoiceDate: new Date(invoiceDateStr),
+            invoiceDate: calculatedInvoiceDate,
             partyId,
             partySnapshot,
             businessSnapshot,
@@ -174,7 +185,7 @@ export async function GET(req: Request) {
     worksheet.mergeCells('A2:C2');
     worksheet.mergeCells('D2:F2');
     setHeaderCell('A2', 'Bill No :- ', billNo);
-    setHeaderCell('D2', 'DATE : ', new Date(invoiceDateStr).toLocaleDateString('en-GB'), true);
+    setHeaderCell('D2', 'DATE : ', calculatedInvoiceDate.toLocaleDateString('en-GB'), true);
 
     // Row 3
     worksheet.mergeCells('A3:C3');
@@ -409,9 +420,9 @@ export async function GET(req: Request) {
     // ───────────────────────────────────────────
     const buffer = await workbook.xlsx.writeBuffer();
 
-    const filename = billingPartyName
-      ? `Invoice_${billingPartyName.replace(/\s+/g, '_')}.xlsx`
-      : `Tax_Invoice_${new Date().toISOString().split('T')[0]}.xlsx`;
+    const cleanPartyName = (billingPartyName || "Tax_Invoice").replace(/[/\\?%*:|"<>]/g, "").trim();
+    const cleanBillNo = (billNo || "").toString().replace(/[/\\?%*:|"<>]/g, "").trim();
+    const filename = cleanBillNo ? `${cleanPartyName} ${cleanBillNo}.xlsx` : `${cleanPartyName}.xlsx`;
 
     const sessionUser = session.user as any;
     await recordActivity({

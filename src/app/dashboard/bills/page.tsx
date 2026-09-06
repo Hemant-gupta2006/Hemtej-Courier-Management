@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
-import { Loader2, Receipt, Search, RefreshCw, ChevronLeft, ChevronRight } from "lucide-react";
+import { Loader2, Receipt, Search, RefreshCw, ChevronLeft, ChevronRight, Trash2 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 interface Bill {
@@ -31,6 +32,8 @@ export default function BillRegisterPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [deletingBill, setDeletingBill] = useState<Bill | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     fetchBills();
@@ -101,6 +104,33 @@ export default function BillRegisterPage() {
       toast.error(error.message || "An error occurred");
     } finally {
       setRegeneratingId(null);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deletingBill || isDeleting) return;
+    setIsDeleting(true);
+    try {
+      const res = await fetch(`/api/bills/${deletingBill.id}`, {
+        method: "DELETE"
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || "Failed to delete bill");
+      }
+
+      toast.success("Bill deleted successfully");
+      setDeletingBill(null);
+
+      if (bills.length === 1 && page > 1) {
+        setPage(p => p - 1);
+      } else {
+        fetchBills();
+      }
+    } catch (error: any) {
+      toast.error(error.message || "Failed to delete bill");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -183,20 +213,32 @@ export default function BillRegisterPage() {
                       <td className="px-4 py-4 text-right text-slate-500">₹{bill.sgst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
                       <td className="px-4 py-4 text-right font-bold text-slate-900 dark:text-slate-100">₹{bill.netAmount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
                       <td className="px-4 py-4 text-center">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleRegenerate(bill.id)}
-                          disabled={regeneratingId === bill.id}
-                          className="h-8 rounded-lg text-purple-600 border-purple-200 hover:bg-purple-50 dark:border-purple-900 dark:hover:bg-purple-900/30"
-                        >
-                          {regeneratingId === bill.id ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
-                          ) : (
-                            <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                          )}
-                          Regenerate
-                        </Button>
+                        <div className="flex items-center justify-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleRegenerate(bill.id)}
+                            disabled={regeneratingId === bill.id || isDeleting}
+                            className="h-8 rounded-lg text-purple-600 border-purple-200 hover:bg-purple-50 dark:border-purple-900 dark:hover:bg-purple-900/30"
+                          >
+                            {regeneratingId === bill.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
+                            ) : (
+                              <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                            )}
+                            Regenerate
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setDeletingBill(bill)}
+                            disabled={regeneratingId === bill.id || isDeleting}
+                            className="h-8 rounded-lg text-rose-600 border-rose-200 hover:bg-rose-50 dark:border-rose-900/50 dark:text-rose-400 dark:hover:bg-rose-900/20 hover:border-rose-300 transition-colors"
+                          >
+                            <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                            Delete
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -235,6 +277,56 @@ export default function BillRegisterPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deletingBill} onOpenChange={(open) => !open && !isDeleting && setDeletingBill(null)}>
+        <DialogContent className="sm:max-w-md bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-2xl bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400">
+                <Trash2 className="h-5 w-5" />
+              </div>
+              <div>
+                <DialogTitle className="text-lg">Delete Bill</DialogTitle>
+                <DialogDescription className="text-sm mt-0.5">
+                  This action cannot be undone.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+          <div className="py-2 text-sm text-slate-600 dark:text-slate-400">
+            Are you sure you want to delete <span className="font-semibold text-slate-900 dark:text-slate-100">Bill #{deletingBill?.billNo || "No number"}</span> ({deletingBill?.party?.officialInvoiceName || deletingBill?.billingPartyNames[0] || "Unknown Party"})? Associated courier entries will remain intact and unlinked.
+          </div>
+          <DialogFooter className="flex items-center justify-end gap-2 pt-2">
+            <Button
+              variant="outline"
+              onClick={() => setDeletingBill(null)}
+              disabled={isDeleting}
+              className="rounded-xl"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDelete}
+              disabled={isDeleting}
+              className="rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold shadow-md shadow-rose-600/20"
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                  Deleting...
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4 mr-1.5" />
+                  Delete Bill
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

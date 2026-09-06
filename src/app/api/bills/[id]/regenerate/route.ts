@@ -4,6 +4,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { generateBillingExcel } from "@/lib/excel-billing";
 import { recordActivity } from "@/lib/activityLog";
+import { calculateGstBillDate, resolveBillingMonthYear } from "@/lib/billing-date";
 
 export async function POST(
   req: Request,
@@ -65,7 +66,17 @@ export async function POST(
     const igst = 0;
     const netAmount = Number((grossAmount + cgst + sgst + igst).toFixed(2));
 
-    // 4. Update the Invoice with recalculated amounts
+    // 4. Resolve billing month & year and calculate GST bill date if billing dates are present
+    let invoiceDate = invoice.invoiceDate;
+    if (invoice.billingFromDate || invoice.billingToDate) {
+      const { billingMonth, billingYear } = resolveBillingMonthYear({
+        startDate: invoice.billingFromDate ? invoice.billingFromDate.toISOString().split('T')[0] : undefined,
+        endDate: invoice.billingToDate ? invoice.billingToDate.toISOString().split('T')[0] : undefined,
+      });
+      invoiceDate = calculateGstBillDate(billingMonth, billingYear, invoice.createdAt || new Date());
+    }
+
+    // Update the Invoice with recalculated amounts and date
     const updatedInvoice = await prisma.invoice.update({
       where: { id: invoiceId },
       data: {
@@ -75,7 +86,7 @@ export async function POST(
         sgst,
         igst,
         netAmount,
-        // (optional: could also explicitly ensure all these entries point to this invoiceId)
+        invoiceDate,
       }
     });
 
@@ -94,10 +105,10 @@ export async function POST(
     };
 
     let billingPartyName = "";
-    if (pNames.length > 0) {
-      billingPartyName = pNames[0];
-    } else if (partySnapshot?.officialInvoiceName) {
+    if (partySnapshot?.officialInvoiceName) {
       billingPartyName = partySnapshot.officialInvoiceName;
+    } else if (pNames.length > 0) {
+      billingPartyName = pNames[0];
     }
 
     const buffer = await generateBillingExcel({
@@ -121,6 +132,11 @@ export async function POST(
       req
     });
 
+    // Format fileName as `<party name> <bill no>.xlsx`
+    const cleanPartyName = (billingPartyName || "Tax_Invoice").replace(/[/\\?%*:|"<>]/g, "").trim();
+    const cleanBillNo = (updatedInvoice.billNo || "").toString().replace(/[/\\?%*:|"<>]/g, "").trim();
+    const fileName = cleanBillNo ? `${cleanPartyName} ${cleanBillNo}.xlsx` : `${cleanPartyName}.xlsx`;
+
     return NextResponse.json({
       success: true,
       data: {
@@ -128,7 +144,7 @@ export async function POST(
         billNo: updatedInvoice.billNo || "",
         invoiceId: updatedInvoice.id,
         fileBase64: buffer.toString('base64'),
-        fileName: `Invoice_${updatedInvoice.billNo || ""}_${billingPartyName || 'Tax_Invoice'}.xlsx`
+        fileName
       }
     });
 

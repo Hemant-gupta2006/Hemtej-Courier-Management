@@ -4,6 +4,7 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 import { generateBillingExcel } from "@/lib/excel-billing";
 import { recordActivity } from "@/lib/activityLog";
+import { calculateGstBillDate, resolveBillingMonthYear } from "@/lib/billing-date";
 
 export async function GET(req: Request) {
   try {
@@ -70,6 +71,9 @@ export async function POST(req: Request) {
       startDate, 
       endDate, 
       invoiceDate, 
+      billingMonth,
+      billingYear,
+      billNo,
       partyAddress1, 
       partyAddress2, 
       partyCity, 
@@ -118,9 +122,19 @@ export async function POST(req: Request) {
     const igst = 0;
     const netAmount = Number((grossAmount + cgst + sgst + igst).toFixed(2));
 
+    let resolvedPartyId = partyId;
+    if (!resolvedPartyId && billingPartyName) {
+      const matchedParty = await prisma.billingParty.findFirst({
+        where: { officialInvoiceName: { equals: billingPartyName.trim(), mode: "insensitive" } }
+      });
+      if (matchedParty) {
+        resolvedPartyId = matchedParty.id;
+      }
+    }
+
     let partySnapshot: any = {};
-    if (partyId) {
-      const party = await prisma.billingParty.findUnique({ where: { id: partyId } });
+    if (resolvedPartyId) {
+      const party = await prisma.billingParty.findUnique({ where: { id: resolvedPartyId } });
       if (party) {
         partySnapshot = {
           officialInvoiceName: party.officialInvoiceName,
@@ -133,6 +147,17 @@ export async function POST(req: Request) {
           gstNumber: partyGst || party.gstNumber,
         };
       }
+    } else {
+      partySnapshot = {
+        officialInvoiceName: billingPartyName || "",
+        addressLine1: partyAddress1 || "",
+        addressLine2: partyAddress2 || "",
+        city: partyCity || "",
+        state: partyState || "",
+        pincode: partyPincode || "",
+        contactNumber: partyContact || "",
+        gstNumber: partyGst || "",
+      };
     }
 
     const businessSnapshot = {
@@ -142,25 +167,48 @@ export async function POST(req: Request) {
       businessGst: businessGst || "27AYDPG0955B1ZV"
     };
 
-    // 1. Allocate next Bill Number inside a transaction
-    const allocatedBill = await prisma.$transaction(async (tx) => {
-      const settings = await tx.systemSettings.update({
-        where: { id: 'global' },
-        data: { lastBillNo: { increment: 1 } }
+    // 1. Allocate next Bill Number or use user-provided Bill Number
+    let allocatedBill = (billNo || body.billNo)?.toString().trim();
+    if (!allocatedBill) {
+      allocatedBill = await prisma.$transaction(async (tx) => {
+        const settings = await tx.systemSettings.upsert({
+          where: { id: 'global' },
+          create: { id: 'global', lastBillNo: 101 },
+          update: { lastBillNo: { increment: 1 } }
+        });
+        return settings.lastBillNo.toString();
       });
-      return settings.lastBillNo.toString();
-    });
+    } else {
+      const numericBill = parseInt(allocatedBill, 10);
+      if (!isNaN(numericBill)) {
+        const existing = await prisma.systemSettings.findUnique({ where: { id: 'global' } });
+        if (!existing) {
+          await prisma.systemSettings.create({ data: { id: 'global', lastBillNo: numericBill } });
+        } else if (numericBill > existing.lastBillNo) {
+          await prisma.systemSettings.update({ where: { id: 'global' }, data: { lastBillNo: numericBill } });
+        }
+      }
+    }
 
-    // 2. Save the Invoice with generation parameters
+    // 2. Resolve billing month & year and calculate GST bill date
+    const { billingMonth: resolvedMonth, billingYear: resolvedYear } = resolveBillingMonthYear({
+      billingMonth,
+      billingYear,
+      startDate,
+      endDate
+    });
+    const calculatedInvoiceDate = calculateGstBillDate(resolvedMonth, resolvedYear);
+
+    // Save the Invoice with generation parameters
     const newInvoice = await prisma.invoice.create({
       data: {
         userId,
         billNo: allocatedBill,
-        invoiceDate: invoiceDate ? new Date(invoiceDate) : new Date(),
+        invoiceDate: calculatedInvoiceDate,
         billingFromDate: startDate ? new Date(startDate) : null,
         billingToDate: endDate ? new Date(endDate) : null,
         billingPartyNames: pNames,
-        partyId: partyId || null,
+        partyId: resolvedPartyId || null,
         partySnapshot,
         businessSnapshot,
         entriesCount: entries.length,
@@ -179,6 +227,8 @@ export async function POST(req: Request) {
       data: { invoiceId: newInvoice.id }
     });
 
+    const partyNameForExcel = (billingPartyName?.trim() || partySnapshot.officialInvoiceName || "").trim();
+
     // 4. Generate Excel
     const buffer = await generateBillingExcel({
       entries,
@@ -186,7 +236,7 @@ export async function POST(req: Request) {
       invoiceDate: newInvoice.invoiceDate,
       businessSnapshot,
       partySnapshot,
-      billingPartyName: billingPartyName || partySnapshot.officialInvoiceName || ""
+      billingPartyName: partyNameForExcel
     });
 
     const sessionUser = session.user as any;
@@ -201,6 +251,11 @@ export async function POST(req: Request) {
       req
     });
 
+    // Format fileName as `<party name> <bill no>.xlsx`
+    const cleanPartyName = (partyNameForExcel || "Tax_Invoice").replace(/[/\\?%*:|"<>]/g, "").trim();
+    const cleanBillNo = allocatedBill.toString().replace(/[/\\?%*:|"<>]/g, "").trim();
+    const fileName = cleanBillNo ? `${cleanPartyName} ${cleanBillNo}.xlsx` : `${cleanPartyName}.xlsx`;
+
     // Convert Buffer to Base64 to return in JSON
     // (Because this is a POST request, returning JSON with base64 is safer for React clients to handle)
     return NextResponse.json({
@@ -210,12 +265,70 @@ export async function POST(req: Request) {
         billNo: allocatedBill,
         invoiceId: newInvoice.id,
         fileBase64: buffer.toString('base64'),
-        fileName: `Invoice_${allocatedBill}_${billingPartyName || 'Tax_Invoice'}.xlsx`
+        fileName
       }
     });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("[BILLS_POST_ERROR]", error);
+    if (error?.code === "P2002") {
+      return NextResponse.json({ success: false, error: "A bill with this Bill Number already exists. Please choose another." }, { status: 400 });
+    }
     return NextResponse.json({ success: false, error: "Internal Server Error" }, { status: 500 });
   }
 }
+
+export async function DELETE(req: Request) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
+    const sessionUser = session.user as any;
+
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
+    if (!id) {
+      return NextResponse.json({ success: false, error: "Bill ID is required" }, { status: 400 });
+    }
+
+    const invoice = await prisma.invoice.findUnique({
+      where: { id }
+    });
+
+    if (!invoice) {
+      return NextResponse.json({ success: false, error: "Bill not found" }, { status: 404 });
+    }
+
+    if (invoice.userId !== sessionUser.id && sessionUser.role !== "Admin") {
+      return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 403 });
+    }
+
+    await prisma.courierEntry.updateMany({
+      where: { invoiceId: id },
+      data: { invoiceId: null }
+    });
+
+    await prisma.invoice.delete({
+      where: { id }
+    });
+
+    await recordActivity({
+      userId: sessionUser.id,
+      userName: sessionUser.name || sessionUser.email || "Staff",
+      role: sessionUser.role || "Staff",
+      action: "INVOICE_DELETED",
+      entity: "Invoice",
+      entityId: id,
+      newValue: JSON.stringify({ billNo: invoice.billNo, netAmount: invoice.netAmount }),
+      req
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: { message: "Bill deleted successfully" }
+    });
+  } catch (error) {
+    console.error("[BILLS_DELETE_ERROR]", error);
+    return NextResponse.json({ success: false, error: "Internal Server Error" }, { status: 500 });
+  }
+}
+

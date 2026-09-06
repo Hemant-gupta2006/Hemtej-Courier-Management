@@ -11,9 +11,13 @@ import { getAutocompleteData } from "@/lib/autocomplete";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { PartyFormModal } from "@/components/PartyFormModal";
+import { calculateGstBillDateString } from "@/lib/billing-date";
 
 export default function ReportsPage() {
   const [manifestDate, setManifestDate] = useState(new Date().toISOString().split('T')[0]);
+  const [billingDateMode, setBillingDateMode] = useState<"month" | "range">("month");
+  const [billingMonth, setBillingMonth] = useState((new Date().getMonth() + 1).toString());
+  const [billingYear, setBillingYear] = useState(new Date().getFullYear().toString());
   const [billingFromDate, setBillingFromDate] = useState("");
   const [billingToDate, setBillingToDate] = useState("");
   
@@ -33,7 +37,7 @@ export default function ReportsPage() {
   const partySearchRef = useRef<HTMLDivElement>(null);
   const [advancedDetails, setAdvancedDetails] = useState({
     billNo: "",
-    invoiceDate: new Date().toISOString().split('T')[0],
+    invoiceDate: calculateGstBillDateString(new Date().getMonth() + 1, new Date().getFullYear()),
     dueDate: "",
     partyAddress1: "",
     partyAddress2: "",
@@ -60,15 +64,60 @@ export default function ReportsPage() {
 
   const today = new Date().toISOString().split('T')[0];
 
+  useEffect(() => {
+    if (billingDateMode === "month") {
+      const m = parseInt(billingMonth, 10);
+      const y = parseInt(billingYear, 10);
+      const mStr = billingMonth.padStart(2, '0');
+      const lastDay = new Date(y, m, 0).getDate();
+      setBillingFromDate(`${billingYear}-${mStr}-01`);
+      setBillingToDate(`${billingYear}-${mStr}-${String(lastDay).padStart(2, '0')}`);
+
+      const calculatedInvoiceDate = calculateGstBillDateString(m, y);
+      setAdvancedDetails(prev => ({ ...prev, invoiceDate: calculatedInvoiceDate }));
+    }
+  }, [billingDateMode, billingMonth, billingYear]);
+
+  useEffect(() => {
+    if (billingDateMode === "range" && billingToDate) {
+      const parts = billingToDate.split('-');
+      if (parts.length >= 2) {
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        if (!isNaN(y) && !isNaN(m) && m >= 1 && m <= 12) {
+          const calculatedInvoiceDate = calculateGstBillDateString(m, y);
+          setAdvancedDetails(prev => ({ ...prev, invoiceDate: calculatedInvoiceDate }));
+        }
+      }
+    }
+  }, [billingDateMode, billingToDate]);
+
   const dateError = useMemo(() => {
-    if (!billingFromDate || !billingToDate) return "";
-    if (billingFromDate > billingToDate) return "End date must be after start date";
-    if (billingFromDate > today || billingToDate > today) return "Future dates are not allowed";
-    return "";
-  }, [billingFromDate, billingToDate, today]);
+    if (billingDateMode === "range") {
+      if (!billingFromDate || !billingToDate) return "";
+      if (billingFromDate > billingToDate) return "End date must be after start date";
+      if (billingFromDate > today || billingToDate > today) return "Future dates are not allowed";
+      return "";
+    } else {
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      const currentMonth = now.getMonth() + 1;
+      const m = parseInt(billingMonth, 10);
+      const y = parseInt(billingYear, 10);
+      if (y > currentYear || (y === currentYear && m > currentMonth)) {
+        return "Future month cannot be selected";
+      }
+      return "";
+    }
+  }, [billingDateMode, billingFromDate, billingToDate, billingMonth, billingYear, today]);
 
   const isManifestValid = !!manifestDate && manifestDate <= today;
-  const isBillingValid = !!billingFromDate && !!billingToDate && isValidParty && !dateError;
+  const isBillingValid = useMemo(() => {
+    if (billingDateMode === "range") {
+      return !!billingFromDate && !!billingToDate && isValidParty && !dateError;
+    }
+    return !!billingMonth && !!billingYear && isValidParty && !dateError;
+  }, [billingDateMode, billingFromDate, billingToDate, billingMonth, billingYear, isValidParty, dateError]);
 
   useEffect(() => {
     getAutocompleteData().then(data => {
@@ -152,12 +201,23 @@ export default function ReportsPage() {
         });
       }
 
+      const effectiveStartDate = billingDateMode === "month"
+        ? `${billingYear}-${billingMonth.padStart(2, '0')}-01`
+        : billingFromDate;
+
+      const lastDayOfMonth = new Date(parseInt(billingYear, 10), parseInt(billingMonth, 10), 0).getDate();
+      const effectiveEndDate = billingDateMode === "month"
+        ? `${billingYear}-${billingMonth.padStart(2, '0')}-${String(lastDayOfMonth).padStart(2, '0')}`
+        : billingToDate;
+
       const payload = {
-        startDate: billingFromDate || undefined,
-        endDate: billingToDate || undefined,
+        startDate: effectiveStartDate || undefined,
+        endDate: effectiveEndDate || undefined,
         billingPartyName: billingPartyName.trim() || undefined,
         partyId: selectedParty?.id || undefined,
         partyNames: uniqueParties,
+        billingMonth: billingDateMode === "month" ? parseInt(billingMonth, 10) : undefined,
+        billingYear: billingDateMode === "month" ? parseInt(billingYear, 10) : undefined,
         ...advancedDetails
       };
 
@@ -184,7 +244,10 @@ export default function ReportsPage() {
       const downloadUrl = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = downloadUrl;
-      a.download = data.data.fileName;
+      const fallbackPartyName = (billingPartyName.trim() || selectedParty?.officialInvoiceName || "Tax_Invoice").replace(/[/\\?%*:|"<>]/g, "").trim();
+      const fallbackBillNo = (data.data?.billNo || advancedDetails.billNo || "").toString().replace(/[/\\?%*:|"<>]/g, "").trim();
+      const fallbackFileName = fallbackBillNo ? `${fallbackPartyName} ${fallbackBillNo}.xlsx` : `${fallbackPartyName}.xlsx`;
+      a.download = data.data?.fileName || fallbackFileName;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(downloadUrl);
@@ -256,7 +319,9 @@ export default function ReportsPage() {
     if (isMonthlyLoading) return;
     setIsMonthlyLoading(true);
     try {
-      await downloadFile(`/api/reports/monthly?month=${monthlyMonth}&year=${monthlyYear}`, `Monthly_Register_${monthlyMonth}_${monthlyYear}.xlsx`);
+      const monthIndex = parseInt(monthlyMonth, 10) - 1;
+      const monthName = new Date(parseInt(monthlyYear, 10), monthIndex, 1).toLocaleString('default', { month: 'long' });
+      await downloadFile(`/api/reports/monthly?month=${monthlyMonth}&year=${monthlyYear}`, `${monthName} ${monthlyYear}.xlsx`);
     } catch (error: any) {
       toast.error(error.message || "Failed to generate monthly report");
     } finally {
@@ -378,7 +443,7 @@ export default function ReportsPage() {
                   <SelectContent>
                     {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
                       <SelectItem key={m} value={m.toString()}>
-                        {new Date(0, m - 1).toLocaleString('default', { month: 'short' })}
+                        {new Date(0, m - 1).toLocaleString('default', { month: 'long' })}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -441,39 +506,110 @@ export default function ReportsPage() {
               />
             </div>
             
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">From Date</label>
-                <Input
-                  type="date"
-                  max={today}
-                  value={billingFromDate}
-                  onChange={(e) => setBillingFromDate(e.target.value)}
-                  className={cn(
-                    "rounded-xl h-11 bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800",
-                    (billingFromDate > today || (billingFromDate && billingToDate && billingFromDate > billingToDate)) && "border-destructive focus-visible:ring-destructive"
-                  )}
-                />
+            <div className="space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <label className="text-sm font-semibold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+                  <Calendar className="h-4 w-4 text-purple-500" />
+                  {billingDateMode === "month" ? "Billing Period (By Month)" : "Billing Period (Custom Date Range)"}
+                </label>
+                <div className="flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-900/80 rounded-xl text-xs font-semibold w-fit border border-slate-200/50 dark:border-slate-800/50">
+                  <button
+                    type="button"
+                    onClick={() => setBillingDateMode("month")}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer",
+                      billingDateMode === "month"
+                        ? "bg-white dark:bg-slate-800 text-purple-600 dark:text-purple-400 shadow-sm font-bold"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+                    )}
+                  >
+                    Select Month
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBillingDateMode("range")}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 cursor-pointer",
+                      billingDateMode === "range"
+                        ? "bg-white dark:bg-slate-800 text-purple-600 dark:text-purple-400 shadow-sm font-bold"
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200"
+                    )}
+                  >
+                    Date Range
+                  </button>
+                </div>
               </div>
-              <div className="space-y-2 md:col-span-2">
-                <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">To Date</label>
-                <Input
-                  type="date"
-                  max={today}
-                  value={billingToDate}
-                  onChange={(e) => setBillingToDate(e.target.value)}
-                  className={cn(
-                    "rounded-xl h-11 bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800",
-                    (billingToDate > today || (billingFromDate && billingToDate && billingFromDate > billingToDate)) && "border-destructive focus-visible:ring-destructive"
-                  )}
-                />
-              </div>
+
+              {billingDateMode === "month" ? (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Month</label>
+                    <Select value={billingMonth} onValueChange={(val) => val && setBillingMonth(val)}>
+                      <SelectTrigger className="rounded-xl h-11 bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800">
+                        <SelectValue placeholder="Month" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                          <SelectItem key={m} value={m.toString()}>
+                            {new Date(0, m - 1).toLocaleString('default', { month: 'long' })}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">Year</label>
+                    <Select value={billingYear} onValueChange={(val) => val && setBillingYear(val)}>
+                      <SelectTrigger className="rounded-xl h-11 bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800">
+                        <SelectValue placeholder="Year" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - 2 + i).map((y) => (
+                          <SelectItem key={y} value={y.toString()}>
+                            {y}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="space-y-2 md:col-span-2">
+                    <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">From Date</label>
+                    <Input
+                      type="date"
+                      max={today}
+                      value={billingFromDate}
+                      onChange={(e) => setBillingFromDate(e.target.value)}
+                      className={cn(
+                        "rounded-xl h-11 bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800",
+                        (billingFromDate > today || (billingFromDate && billingToDate && billingFromDate > billingToDate)) && "border-destructive focus-visible:ring-destructive"
+                      )}
+                    />
+                  </div>
+                  <div className="space-y-2 md:col-span-2">
+                    <label className="text-xs font-semibold text-slate-600 dark:text-slate-400">To Date</label>
+                    <Input
+                      type="date"
+                      max={today}
+                      value={billingToDate}
+                      onChange={(e) => setBillingToDate(e.target.value)}
+                      className={cn(
+                        "rounded-xl h-11 bg-white dark:bg-slate-950 border-slate-200 dark:border-slate-800",
+                        (billingToDate > today || (billingFromDate && billingToDate && billingFromDate > billingToDate)) && "border-destructive focus-visible:ring-destructive"
+                      )}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {dateError && (
+                <p className="text-[10px] font-bold text-destructive uppercase tracking-wider flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3" /> {dateError}
+                </p>
+              )}
             </div>
-            {dateError && (
-              <p className="text-[10px] font-bold text-destructive uppercase tracking-wider flex items-center gap-1">
-                <AlertCircle className="h-3 w-3" /> {dateError}
-              </p>
-            )}
 
             <div className="space-y-3">
               <label className="text-sm font-semibold text-slate-700 dark:text-slate-300">Booking Party Names</label>
