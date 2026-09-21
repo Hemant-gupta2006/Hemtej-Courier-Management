@@ -18,7 +18,7 @@ export async function GET(req: Request) {
     const activeTimeLimit = new Date();
     activeTimeLimit.setMinutes(activeTimeLimit.getMinutes() - 15);
 
-    // Run parallel database queries for business metrics
+    // Run database queries in two focused batches to prevent connection pool exhaustion
     const [
       totalCouriers,
       todayBookings,
@@ -27,88 +27,61 @@ export async function GET(req: Request) {
       cashResult,
       accountResult,
       totalRevenueResult,
-      totalInvoices,
-      totalManifests,
-      recentAuditLogs,
-      recentActiveLogs,
-      fromParties,
-      toParties
     ] = await Promise.all([
-      // Total Courier Entries
       prisma.courierEntry.count(),
-
-      // Today's Entries
       prisma.courierEntry.count({
         where: { date: { gte: startOfToday } }
       }),
-
-      // This Month Entries
       prisma.courierEntry.count({
         where: { date: { gte: startOfMonth } }
       }),
-
-      // Total Registers
       prisma.courierRegister.count(),
-
-      // Cash Amount sum
       prisma.courierEntry.aggregate({
         _sum: { amount: true },
         where: { status: { equals: "Cash", mode: "insensitive" } }
       }),
-
-      // Account Amount sum
       prisma.courierEntry.aggregate({
         _sum: { amount: true },
         where: { status: { equals: "Account", mode: "insensitive" } }
       }),
-
-      // Total Revenue sum (all except cancelled if status === Cancelled)
       prisma.courierEntry.aggregate({
         _sum: { amount: true },
         where: { NOT: { status: { equals: "Cancelled", mode: "insensitive" } } }
       }),
+    ]);
 
-      // Total Invoices Generated
+    const [
+      totalInvoices,
+      totalManifests,
+      recentAuditLogs,
+      recentActiveLogs,
+      customerCountResult
+    ] = await Promise.all([
       prisma.auditLog.count({
         where: { action: "INVOICE_DOWNLOAD" }
       }),
-
-      // Total Manifests Generated
       prisma.auditLog.count({
         where: { action: "MANIFEST_DOWNLOAD" }
       }),
-
-      // Chronological Audit Logs (Latest Activity)
       prisma.auditLog.findMany({
         orderBy: { timestamp: "desc" },
         take: 10
       }),
-
-      // Audit logs for active presence in the last 15 minutes
       prisma.auditLog.findMany({
         where: { timestamp: { gte: activeTimeLimit } },
         orderBy: { timestamp: "desc" }
       }),
-
-      // Unique senders
-      prisma.courierEntry.findMany({
-        distinct: ["fromParty"],
-        select: { fromParty: true }
-      }),
-
-      // Unique receivers
-      prisma.courierEntry.findMany({
-        distinct: ["toParty"],
-        select: { toParty: true }
-      })
+      // High-performance distinct count via raw SQL instead of scanning all entries in memory
+      prisma.$queryRaw<{ count: number }[]>`
+        SELECT COUNT(DISTINCT lower(trim(party)))::int as count FROM (
+          SELECT "fromParty" as party FROM "CourierEntry" WHERE "fromParty" IS NOT NULL AND TRIM("fromParty") != ''
+          UNION ALL
+          SELECT "toParty" as party FROM "CourierEntry" WHERE "toParty" IS NOT NULL AND TRIM("toParty") != ''
+        ) as combined_parties
+      `.catch(() => [{ count: 0 }])
     ]);
 
-    // Calculate unique customers count
-    const uniqueCustomers = new Set([
-      ...fromParties.map((p) => p.fromParty.trim().toLowerCase()),
-      ...toParties.map((p) => p.toParty.trim().toLowerCase())
-    ]);
-    const totalCustomers = uniqueCustomers.size;
+    const totalCustomers = customerCountResult[0]?.count || 0;
 
     // Active Users Presense
     const activeUsersMap: Record<string, { id: string; name: string; lastActive: Date; lastAction: string; isOnline: boolean }> = {};

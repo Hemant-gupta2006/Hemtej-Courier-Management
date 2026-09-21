@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Package, Mail } from "lucide-react";
+import { Package, Mail, ShieldCheck } from "lucide-react";
 import { motion } from "framer-motion";
 
 export default function LoginPage() {
@@ -124,13 +124,35 @@ export default function LoginPage() {
 
             <div className="space-y-4">
               <Button 
-                className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg transition-all rounded-xl py-6" 
+                className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg transition-all rounded-xl py-6 font-semibold" 
                 type="submit" 
                 disabled={loading}
               >
                 {loading ? "Signing in..." : "Sign In with Email"}
               </Button>
             </div>
+
+            <div className="relative my-2">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-slate-300/40 dark:border-slate-700/40" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-white/60 dark:bg-slate-900/60 px-2 py-0.5 rounded-full text-slate-500 dark:text-slate-400 backdrop-blur-sm">
+                  Or
+                </span>
+              </div>
+            </div>
+
+            <Link href="/admin/login" className="block w-full">
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full bg-white/40 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700 hover:bg-white/70 dark:hover:bg-slate-800/80 text-slate-800 dark:text-slate-200 font-medium py-5 rounded-xl shadow-sm transition-all flex items-center justify-center gap-2 group"
+              >
+                <ShieldCheck className="h-4 w-4 text-red-500 dark:text-red-400 transition-transform group-hover:scale-110" />
+                <span>Login as Admin</span>
+              </Button>
+            </Link>
 
             <div className="text-center text-sm text-slate-600 dark:text-slate-400">
               Don&apos;t have an account?{" "}
