@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/lib/auth";
 
+export const maxDuration = 60; // Allow up to 60s execution time on compatible serverless platforms
+
 export async function POST(req: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -26,143 +28,175 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, message: "No changes to process" });
     }
 
-    // Process all updates in a single transaction
-    const transaction = await prisma.$transaction(async (tx) => {
-      let updatedCount = 0;
-      let conflictCount = 0;
-      const fieldChangesLog: any[] = [];
+    // 1. Collect all challan numbers to batch-fetch in ONE single query
+    const challanNosToCheck = new Set<number>();
+    for (const u of updates) {
+      const c = Number(u.challanNo);
+      if (!isNaN(c) && c > 0) challanNosToCheck.add(c);
+    }
+    if (Array.isArray(insertions)) {
+      for (const item of insertions) {
+        const c = Number(item.challanNo);
+        if (!isNaN(c) && c > 0) challanNosToCheck.add(c);
+      }
+    }
 
-      for (const update of updates) {
-        // Authoritative lookup by challanNo + userId + registerId
-        const record = await tx.courierEntry.findFirst({
-          where: {
-            challanNo: Number(update.challanNo),
-            userId,
-            registerId
-          }
-        });
+    // Fetch all existing records in a single fast query
+    const existingRecords = await prisma.courierEntry.findMany({
+      where: {
+        userId,
+        registerId,
+        challanNo: { in: Array.from(challanNosToCheck) }
+      }
+    });
 
-        if (!record) continue;
+    const existingMap = new Map<number, typeof existingRecords[0]>();
+    for (const rec of existingRecords) {
+      existingMap.set(rec.challanNo, rec);
+    }
 
-        // Zero-Trust Concurrency Validation:
-        // Ensure the record's current state exactly matches the state observed during preview.
-        const dbDateStr = record.date ? new Date(record.date).toISOString().split("T")[0] : "";
-        const snapshot = update.dbSnapshot;
-        if (!snapshot) continue; // Invalid payload
+    // 2. Pre-process updates in memory (0 network round-trips)
+    let conflictCount = 0;
+    let updatedCount = 0;
+    const updatesToPerform: { id: string; data: any }[] = [];
+    const fieldChangesLog: any[] = [];
 
-        const isConflict =
-          dbDateStr !== snapshot.date ||
-          (record.fromParty || "") !== snapshot.fromParty ||
-          (record.toParty || "") !== snapshot.toParty ||
-          (record.destination || "") !== snapshot.destination ||
-          (record.weightValue || 0) !== snapshot.weightValue ||
-          (record.weightUnit || "gm") !== snapshot.weightUnit ||
-          (Number(record.amount) || 0) !== snapshot.amount ||
-          (record.status || "") !== snapshot.status ||
-          (record.mode || "") !== snapshot.mode;
+    for (const update of updates) {
+      const cNo = Number(update.challanNo);
+      const record = existingMap.get(cNo);
+      if (!record) continue;
 
-        if (isConflict) {
-          conflictCount++;
-          continue; // Skip this record, do not overwrite newer DB changes
-        }
+      // Zero-Trust Concurrency Validation:
+      // Ensure the record's current state exactly matches the state observed during preview.
+      const dbDateStr = record.date ? new Date(record.date).toISOString().split("T")[0] : "";
+      const snapshot = update.dbSnapshot;
+      if (!snapshot) continue; // Invalid payload
 
-        // Build the update payload based strictly on the verified changes
-        const dataToUpdate: any = {};
-        const logChanges: any = { challanNo: record.challanNo, changes: {} };
+      const isConflict =
+        dbDateStr !== snapshot.date ||
+        (record.fromParty || "") !== snapshot.fromParty ||
+        (record.toParty || "") !== snapshot.toParty ||
+        (record.destination || "") !== snapshot.destination ||
+        (record.weightValue || 0) !== snapshot.weightValue ||
+        (record.weightUnit || "gm") !== snapshot.weightUnit ||
+        (Number(record.amount) || 0) !== snapshot.amount ||
+        (record.status || "") !== snapshot.status ||
+        (record.mode || "") !== snapshot.mode;
 
-        for (const change of update.changes) {
-          if (change.internalKey === "date") {
-            dataToUpdate.date = change.newValue ? new Date(change.newValue) : null;
-          } else if (change.internalKey === "weight") {
-            dataToUpdate.weightValue = change.internalVal.value;
-            dataToUpdate.weightUnit = change.internalVal.unit;
-          } else if (["fromParty", "toParty", "destination", "status", "mode"].includes(change.internalKey)) {
-            dataToUpdate[change.internalKey] = change.newValue;
-          } else if (change.internalKey === "amount") {
-            dataToUpdate.amount = Number(change.newValue);
-          }
-          logChanges.changes[change.field] = { old: change.oldValue, new: change.newValue };
-        }
-
-        if (Object.keys(dataToUpdate).length > 0) {
-          await tx.courierEntry.update({
-            where: { id: record.id },
-            data: dataToUpdate
-          });
-          updatedCount++;
-          fieldChangesLog.push(logChanges);
-        }
+      if (isConflict) {
+        conflictCount++;
+        continue; // Skip this record, do not overwrite newer DB changes
       }
 
-      // Process insertions (NEW_IN_EXCEL rows)
-      let insertedCount = 0;
-      const insertedRecords: any[] = [];
-      const insertionLog: any[] = [];
+      // Build the update payload based strictly on the verified changes
+      const dataToUpdate: any = {};
+      const logChanges: any = { challanNo: record.challanNo, changes: {} };
 
-      if (Array.isArray(insertions) && insertions.length > 0) {
-        // Pre-fetch the max srNo once before the loop
-        const maxSrNoResult = await tx.courierEntry.aggregate({
-          where: registerId ? { userId, registerId } : { userId },
-          _max: { srNo: true }
-        });
-        let currentMaxSrNo = maxSrNoResult._max.srNo || 0;
+      for (const change of update.changes) {
+        if (change.internalKey === "date") {
+          dataToUpdate.date = change.newValue ? new Date(change.newValue) : null;
+        } else if (change.internalKey === "weight") {
+          dataToUpdate.weightValue = change.internalVal.value;
+          dataToUpdate.weightUnit = change.internalVal.unit;
+        } else if (["fromParty", "toParty", "destination", "status", "mode"].includes(change.internalKey)) {
+          dataToUpdate[change.internalKey] = change.newValue;
+        } else if (change.internalKey === "amount") {
+          dataToUpdate.amount = Number(change.newValue);
+        }
+        logChanges.changes[change.field] = { old: change.oldValue, new: change.newValue };
+      }
 
-        for (const item of insertions) {
-          const cNo = Number(item.challanNo);
-          if (!cNo || isNaN(cNo)) continue;
+      if (Object.keys(dataToUpdate).length > 0) {
+        updatesToPerform.push({ id: record.id, data: dataToUpdate });
+        updatedCount++;
+        fieldChangesLog.push(logChanges);
+      }
+    }
 
-          // 1. Duplicate check (prevent overwriting or double insertion)
-          const exists = await tx.courierEntry.findFirst({
-            where: { challanNo: cNo, userId, registerId }
-          });
-          if (exists) continue; // Skip if it somehow exists now
+    // 3. Pre-process insertions in memory (0 network round-trips)
+    const recordsToInsert: any[] = [];
+    const insertionLog: any[] = [];
 
-          // 2. Parse weight robustly (reusing the same logic)
-          let weightVal = 0;
-          let weightUnit = "gm";
-          if (item.weight) {
-            const str = String(item.weight).trim().toLowerCase();
-            const match = str.match(/^([\d\.]+)\s*(.*)$/);
-            if (match) {
-              weightVal = parseFloat(match[1]) || 0;
-              weightUnit = match[2].trim() || "gm";
-              if (weightUnit === "gm" || weightUnit === "g" || weightUnit === "grams") {
-                weightUnit = "gm";
-                if (str.includes(".") && weightVal < 100) {
-                  weightVal = Math.round(weightVal * 1000);
-                }
-              } else if (weightUnit === "kg" || weightUnit === "kilograms") {
-                weightUnit = "kg";
+    if (Array.isArray(insertions) && insertions.length > 0) {
+      // Pre-fetch the max srNo once before building insert records
+      const maxSrNoResult = await prisma.courierEntry.aggregate({
+        where: registerId ? { userId, registerId } : { userId },
+        _max: { srNo: true }
+      });
+      let currentMaxSrNo = maxSrNoResult._max.srNo || 0;
+
+      for (const item of insertions) {
+        const cNo = Number(item.challanNo);
+        if (!cNo || isNaN(cNo)) continue;
+
+        // Skip if already in database or already staged for insertion
+        if (existingMap.has(cNo)) continue;
+        existingMap.set(cNo, true as any);
+
+        // Parse weight robustly
+        let weightVal = 0;
+        let weightUnit = "gm";
+        if (item.weight) {
+          const str = String(item.weight).trim().toLowerCase();
+          const match = str.match(/^([\d\.]+)\s*(.*)$/);
+          if (match) {
+            weightVal = parseFloat(match[1]) || 0;
+            weightUnit = match[2].trim() || "gm";
+            if (weightUnit === "gm" || weightUnit === "g" || weightUnit === "grams") {
+              weightUnit = "gm";
+              if (str.includes(".") && weightVal < 100) {
+                weightVal = Math.round(weightVal * 1000);
               }
-            } else {
-              weightVal = parseFloat(str) || 0;
+            } else if (weightUnit === "kg" || weightUnit === "kilograms") {
+              weightUnit = "kg";
             }
+          } else {
+            weightVal = parseFloat(str) || 0;
           }
+        }
 
-          currentMaxSrNo++;
+        currentMaxSrNo++;
 
-          // 3. Create the record
-          const newRecord = await tx.courierEntry.create({
-            data: {
-              srNo: currentMaxSrNo,
-              userId,
-              registerId,
-              challanNo: cNo,
-              date: item.date ? new Date(item.date) : new Date(),
-              fromParty: String(item.fromParty || "").trim(),
-              toParty: String(item.toParty || "").trim(),
-              destination: String(item.destination || "").trim(),
-              weightValue: weightVal,
-              weightUnit: weightUnit,
-              amount: Number(item.amount) || 0,
-              status: String(item.status || "").trim(),
-              mode: String(item.mode || "Surface").trim()
-            }
-          });
+        recordsToInsert.push({
+          srNo: currentMaxSrNo,
+          userId,
+          registerId,
+          challanNo: cNo,
+          date: item.date ? new Date(item.date) : new Date(),
+          fromParty: String(item.fromParty || "").trim(),
+          toParty: String(item.toParty || "").trim(),
+          destination: String(item.destination || "").trim(),
+          weightValue: weightVal,
+          weightUnit: weightUnit,
+          amount: Number(item.amount) || 0,
+          status: String(item.status || "").trim(),
+          mode: String(item.mode || "Surface").trim()
+        });
 
-          insertedCount++;
-          insertedRecords.push(newRecord);
-          insertionLog.push(cNo);
+        insertionLog.push(cNo);
+      }
+    }
+
+    // 4. Execute all writes rapidly inside a single transaction
+    const transaction = await prisma.$transaction(async (tx) => {
+      // Chunked concurrent updates (25 per chunk)
+      const CHUNK_SIZE = 25;
+      for (let i = 0; i < updatesToPerform.length; i += CHUNK_SIZE) {
+        const chunk = updatesToPerform.slice(i, i + CHUNK_SIZE);
+        await Promise.all(
+          chunk.map(({ id, data }) => tx.courierEntry.update({ where: { id }, data }))
+        );
+      }
+
+      // Bulk insertions in concurrent chunks
+      let insertedRecords: any[] = [];
+      if (recordsToInsert.length > 0) {
+        for (let i = 0; i < recordsToInsert.length; i += CHUNK_SIZE) {
+          const chunk = recordsToInsert.slice(i, i + CHUNK_SIZE);
+          const created = await Promise.all(
+            chunk.map((data) => tx.courierEntry.create({ data }))
+          );
+          insertedRecords.push(...created);
         }
       }
 
@@ -183,17 +217,22 @@ export async function POST(req: Request) {
           }),
           newValue: JSON.stringify({
             updated: updatedCount,
-            inserted: insertedCount,
+            inserted: recordsToInsert.length,
             fieldChanges: fieldChangesLog,
             insertions: insertionLog
           })
         }
       });
 
-      return { updatedCount, conflictCount, insertedCount, insertedRecords };
+      return {
+        updatedCount,
+        conflictCount,
+        insertedCount: recordsToInsert.length,
+        insertedRecords
+      };
     }, {
-      maxWait: 5000, // 5 seconds max wait to acquire the transaction
-      timeout: 60000 // 60 seconds transaction timeout
+      maxWait: 10000, // 10s wait to acquire connection
+      timeout: 30000  // 30s max transaction timeout
     });
 
     return NextResponse.json({
