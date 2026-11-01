@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import * as XLSX from "xlsx";
-import { getAutocompleteData } from "@/lib/autocomplete";
+import { getAutocompleteData, clearAutocompleteCache } from "@/lib/autocomplete";
 import { formatWeight } from "@/lib/utils";
 import { useRegisters, Register } from "@/context/RegisterContext";
 import { RegisterFilterPopover, RegisterFilters, DEFAULT_REGISTER_FILTERS, FilterOptions } from "@/components/RegisterFilterPopover";
@@ -37,18 +37,34 @@ function DefaultDateModal({
   currentDefault,
   onApply,
   onReset,
+  activeRegister,
 }: {
   open: boolean;
   onClose: () => void;
   currentDefault: string | null;
   onApply: (date: string) => void;
   onReset: () => void;
+  activeRegister?: any;
 }) {
-  const [date, setDate] = useState(currentDefault || new Date().toISOString().split("T")[0]);
+  const pad = (num: number) => String(num).padStart(2, "0");
+  const registerFirstDate = activeRegister?.month && activeRegister?.year
+    ? `${activeRegister.year}-${pad(activeRegister.month)}-01`
+    : new Date().toISOString().split("T")[0];
+
+  const minMaxDate = useMemo(() => {
+    if (!activeRegister?.month || !activeRegister?.year) return {};
+    const { month, year } = activeRegister;
+    const min = `${year}-${pad(month)}-01`;
+    const lastDay = new Date(year, month, 0).getDate();
+    const max = `${year}-${pad(month)}-${pad(lastDay)}`;
+    return { min, max };
+  }, [activeRegister]);
+
+  const [date, setDate] = useState(currentDefault || registerFirstDate);
 
   useEffect(() => {
-    if (open) setDate(currentDefault || new Date().toISOString().split("T")[0]);
-  }, [open, currentDefault]);
+    if (open) setDate(currentDefault || registerFirstDate);
+  }, [open, currentDefault, registerFirstDate]);
 
   if (!open) return null;
 
@@ -81,6 +97,8 @@ function DefaultDateModal({
           <Input
             type="date"
             value={date}
+            min={minMaxDate.min}
+            max={minMaxDate.max}
             onChange={(e) => setDate(e.target.value)}
             className="h-12 bg-slate-800 border border-white/10 rounded-xl text-sm focus:ring-blue-500 text-white"
           />
@@ -442,6 +460,191 @@ function CourierEntryPageInner() {
     refreshRegisters();
   }, [refreshRegisters]);
 
+  // Mobile Background Save Queue
+  interface BackgroundSaveItem {
+    tempId: string;
+    isEdit: boolean;
+    entryData: any;
+    toastId: string | number;
+  }
+  const saveQueueRef = useRef<BackgroundSaveItem[]>([]);
+  const isProcessingQueueRef = useRef(false);
+
+  const processSaveQueue = useCallback(async () => {
+    if (isProcessingQueueRef.current) return;
+    isProcessingQueueRef.current = true;
+
+    try {
+      while (saveQueueRef.current.length > 0) {
+        const item = saveQueueRef.current[0];
+        const { tempId, isEdit, entryData, toastId } = item;
+        const challanNo = Number(entryData.challanNo) || entryData.challanNo;
+
+        try {
+          const url = isEdit ? `/api/couriers/${entryData.id}` : "/api/couriers";
+          const method = isEdit ? "PATCH" : "POST";
+
+          const payload: any = {
+            date: entryData.date,
+            challanNo,
+            fromParty: entryData.fromParty,
+            toParty: entryData.toParty,
+            weightValue: Number(entryData.weightValue) || 0,
+            weightUnit: entryData.weightUnit || "gm",
+            destination: entryData.destination,
+            amount: parseFloat(entryData.amount) || 0,
+            status: entryData.status,
+            mode: entryData.mode,
+          };
+          if (!isEdit) {
+            payload.registerId = activeRegister?.id;
+          }
+
+          const res = await fetch(url, {
+            method,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+
+          const resJson = await res.json().catch(() => null);
+
+          if (res.ok && resJson && resJson.success !== false) {
+            const saved = resJson.data || resJson;
+            toast.success(
+              isEdit ? `CH-${saved.challanNo} updated!` : `CH-${saved.challanNo} saved!`,
+              { id: toastId }
+            );
+            clearAutocompleteCache();
+
+            setEntries((prev) =>
+              prev.map((e) => {
+                if (isEdit && e.id === saved.id) {
+                  return { ...e, ...saved, isSaving: false, saveError: null };
+                }
+                if (!isEdit && (e.tempId === tempId || e.id === tempId)) {
+                  return { ...saved, isSaving: false, saveError: null };
+                }
+                return e;
+              })
+            );
+            refreshRegisters();
+          } else {
+            const errMsg = resJson?.error || (typeof resJson === "string" ? resJson : "Failed to save entry");
+            toast.error(errMsg, { id: toastId });
+            setEntries((prev) =>
+              prev.map((e) => {
+                if ((!isEdit && (e.tempId === tempId || e.id === tempId)) || (isEdit && e.id === entryData.id)) {
+                  return { ...e, isSaving: false, saveError: errMsg, rawPayload: payload };
+                }
+                return e;
+              })
+            );
+          }
+        } catch (err: any) {
+          console.error("Background save queue error:", err);
+          toast.error("Network error while saving entry", { id: toastId });
+          setEntries((prev) =>
+            prev.map((e) => {
+              if ((!isEdit && (e.tempId === tempId || e.id === tempId)) || (isEdit && e.id === entryData.id)) {
+                return { ...e, isSaving: false, saveError: "Network error", rawPayload: entryData };
+              }
+              return e;
+            })
+          );
+        } finally {
+          saveQueueRef.current.shift();
+        }
+      }
+    } finally {
+      isProcessingQueueRef.current = false;
+    }
+  }, [activeRegister?.id, refreshRegisters]);
+
+  const queueBackgroundSave = useCallback(
+    (entryData: any, isEdit: boolean) => {
+      const tempId = isEdit ? entryData.id : `temp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const challanNo = Number(entryData.challanNo) || entryData.challanNo;
+
+      let nextSrNo = entryData.srNo;
+      if (!isEdit) {
+        let currentMax = 0;
+        for (const e of entries) {
+          const s = Number(e.srNo);
+          if (!isNaN(s) && s > currentMax) currentMax = s;
+        }
+        for (const q of saveQueueRef.current) {
+          if (!q.isEdit && q.entryData.srNo && Number(q.entryData.srNo) > currentMax) {
+            currentMax = Number(q.entryData.srNo);
+          }
+        }
+        nextSrNo = currentMax + 1;
+      }
+
+      const optimisticEntry = {
+        ...entryData,
+        id: tempId,
+        tempId: isEdit ? undefined : tempId,
+        srNo: nextSrNo,
+        challanNo,
+        isSaving: true,
+        saveError: null,
+        createdAt: entryData.createdAt || new Date().toISOString(),
+        registerId: activeRegister?.id,
+      };
+
+      setEntries((prev) => {
+        if (isEdit) {
+          return prev.map((e) => (e.id === entryData.id ? { ...e, ...optimisticEntry } : e));
+        } else {
+          return [optimisticEntry, ...prev];
+        }
+      });
+
+      setAutocompleteData((prev) => ({
+        fromParties: entryData.fromParty && !prev.fromParties.includes(entryData.fromParty)
+          ? [entryData.fromParty, ...prev.fromParties]
+          : prev.fromParties,
+        toParties: entryData.toParty && !prev.toParties.includes(entryData.toParty)
+          ? [entryData.toParty, ...prev.toParties]
+          : prev.toParties,
+        destinations: entryData.destination && !prev.destinations.includes(entryData.destination)
+          ? [entryData.destination, ...prev.destinations]
+          : prev.destinations,
+      }));
+
+      const toastId = toast.loading(
+        isEdit ? `Updating CH-${challanNo}...` : `Saving CH-${challanNo} in background...`
+      );
+
+      saveQueueRef.current.push({
+        tempId,
+        isEdit,
+        entryData: { ...entryData, srNo: nextSrNo },
+        toastId,
+      });
+
+      processSaveQueue();
+    },
+    [entries, activeRegister?.id, processSaveQueue]
+  );
+
+  const handleRetrySave = useCallback(
+    (entry: any) => {
+      const isEdit = Boolean(entry.id && !String(entry.id).startsWith("temp-"));
+      const payload = entry.rawPayload || entry;
+      setEntries((prev) =>
+        prev.map((e) => {
+          if (e.id === entry.id || (entry.tempId && e.tempId === entry.tempId)) {
+            return { ...e, isSaving: true, saveError: null };
+          }
+          return e;
+        })
+      );
+      queueBackgroundSave(payload, isEdit);
+    },
+    [queueBackgroundSave]
+  );
+
   const [mobileDefaultDate, setMobileDefaultDate] = useState<string | null>(null);
   const [defaultDateModalOpen, setDefaultDateModalOpen] = useState(false);
   const [createRegisterOpen, setCreateRegisterOpen] = useState(false);
@@ -456,6 +659,15 @@ function CourierEntryPageInner() {
 
   const confirmDeleteEntry = async () => {
     if (!deletingEntry) return;
+
+    if (deletingEntry.tempId || String(deletingEntry.id).startsWith("temp-")) {
+      setEntries((prev) => prev.filter((e) => e.id !== deletingEntry.id && e.tempId !== deletingEntry.tempId));
+      saveQueueRef.current = saveQueueRef.current.filter((q) => q.tempId !== deletingEntry.id && q.tempId !== deletingEntry.tempId);
+      setDeletingEntry(null);
+      toast.success("Entry removed");
+      return;
+    }
+
     setIsDeleting(true);
     try {
       const res = await fetch(`/api/couriers/${deletingEntry.id}`, {
@@ -1005,6 +1217,7 @@ function CourierEntryPageInner() {
         open={defaultDateModalOpen}
         onClose={() => setDefaultDateModalOpen(false)}
         currentDefault={mobileDefaultDate}
+        activeRegister={activeRegister}
         onApply={(d) => {
           setMobileDefaultDate(d);
           setDefaultDateModalOpen(false);
@@ -1013,7 +1226,7 @@ function CourierEntryPageInner() {
         onReset={() => {
           setMobileDefaultDate(null);
           setDefaultDateModalOpen(false);
-          toast.info("Default date cleared");
+          toast.info("Default date cleared (using register's first date)");
         }}
       />
 
@@ -1234,7 +1447,7 @@ function CourierEntryPageInner() {
             ) : (
               paginatedData.map((entry: any) => (
                 <MobileEntryCard
-                  key={entry.id}
+                  key={entry.tempId || entry.id}
                   entry={entry}
                   isReadOnly={isReadOnly}
                   onEdit={(item) => {
@@ -1243,6 +1456,9 @@ function CourierEntryPageInner() {
                   }}
                   onDelete={(item) => {
                     setDeletingEntry(item);
+                  }}
+                  onRetry={(item) => {
+                    handleRetrySave(item);
                   }}
                 />
               ))
@@ -1286,12 +1502,16 @@ function CourierEntryPageInner() {
             existingChallans={existingChallans}
             autocompleteData={autocompleteData}
             activeRegisterId={activeRegister.id}
+            activeRegister={activeRegister}
             isReadOnly={isReadOnly}
             editingEntry={editingEntry}
             isOpen={isFormOpen}
             onOpenChange={(val) => {
               setIsFormOpen(val);
               if (!val) setEditingEntry(null);
+            }}
+            onSaveEntry={(payload, isEdit) => {
+              queueBackgroundSave(payload, isEdit);
             }}
             onSaved={(savedEntry, isEdit) => {
               handleEntrySaved(savedEntry, isEdit);
@@ -1326,11 +1546,13 @@ const MobileEntryCard = memo(function MobileEntryCard({
   entry,
   onEdit,
   onDelete,
+  onRetry,
   isReadOnly = false,
 }: {
   entry: any;
   onEdit?: (entry: any) => void;
   onDelete?: (entry: any) => void;
+  onRetry?: (entry: any) => void;
   isReadOnly?: boolean;
 }) {
   const statusColor: Record<string, string> = {
@@ -1338,26 +1560,55 @@ const MobileEntryCard = memo(function MobileEntryCard({
     Cash: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
   };
 
+  const isSaving = Boolean(entry.isSaving);
+  const saveError = entry.saveError;
+
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.98 }}
       animate={{ opacity: 1, scale: 1 }}
       transition={{ duration: 0.2 }}
-      className="rounded-2xl bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl border border-white/50 dark:border-white/10 shadow-sm hover:shadow-md transition-all p-4 space-y-3 relative overflow-hidden"
+      className={`rounded-2xl bg-white/70 dark:bg-slate-900/70 backdrop-blur-xl border shadow-sm hover:shadow-md transition-all p-4 space-y-3 relative overflow-hidden ${
+        isSaving
+          ? "border-amber-400/40 dark:border-amber-500/30 bg-amber-500/[0.03]"
+          : saveError
+          ? "border-red-400/40 dark:border-red-500/30 bg-red-500/[0.03]"
+          : "border-white/50 dark:border-white/10"
+      }`}
     >
-      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-blue-500/20 to-purple-500/20" />
+      <div
+        className={`absolute inset-x-0 top-0 h-1 ${
+          isSaving
+            ? "bg-amber-500 animate-pulse"
+            : saveError
+            ? "bg-red-500"
+            : "bg-gradient-to-r from-blue-500/20 to-purple-500/20"
+        }`}
+      />
       {/* Header row */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-400 font-medium">#{entry.srNo}</span>
+          <span className="text-xs text-slate-400 font-medium">#{entry.srNo ?? "—"}</span>
           <span className="font-bold text-slate-900 dark:text-white text-sm">CH-{entry.challanNo}</span>
+          {isSaving && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+              <Loader2 className="w-2.5 h-2.5 animate-spin" />
+              Saving...
+            </span>
+          )}
+          {saveError && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-600 dark:text-red-400 bg-red-500/10 px-2 py-0.5 rounded-full border border-red-500/20">
+              <AlertCircle className="w-2.5 h-2.5" />
+              Failed
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
           <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${statusColor[entry.status] ?? "bg-slate-100 text-slate-650"}`}>
             {entry.status}
           </span>
-          {!isReadOnly && (
+          {!isReadOnly && !isSaving && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -1395,8 +1646,8 @@ const MobileEntryCard = memo(function MobileEntryCard({
           </div>
         </div>
 
-        {/* Edit Button positioned on right side where arrow points */}
-        {!isReadOnly && (
+        {/* Edit Button positioned on right side */}
+        {!isReadOnly && !isSaving && (
           <div className="shrink-0 self-center">
             <button
               onClick={(e) => {
@@ -1413,10 +1664,27 @@ const MobileEntryCard = memo(function MobileEntryCard({
         )}
       </div>
 
+      {/* If save error, show retry bar */}
+      {saveError && (
+        <div className="flex items-center justify-between p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-600 dark:text-red-400">
+          <span className="truncate max-w-[200px] font-medium">{saveError}</span>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onRetry?.(entry);
+            }}
+            className="flex items-center gap-1 px-3 py-1 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-700 active:scale-95 transition-all shadow-sm"
+          >
+            <RefreshCw className="w-3 h-3" />
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Footer */}
       <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-slate-800">
         <span className="text-[10px] text-slate-400">
-          {new Date(entry.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+          {entry.date ? new Date(entry.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "Today"}
           {" · "}{entry.mode}
         </span>
         <span className="font-extrabold text-slate-900 dark:text-white text-sm">

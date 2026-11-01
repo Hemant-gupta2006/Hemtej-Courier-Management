@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo } from "react";
 import { toast } from "sonner";
-import { PlusCircle, X, Save } from "lucide-react";
+import { PlusCircle, X, Save, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -188,8 +188,10 @@ export function MobileEntryForm({
   existingChallans,
   autocompleteData,
   onSaved,
+  onSaveEntry,
   mobileDefaultDate,
   activeRegisterId,
+  activeRegister,
   isReadOnly = false,
   editingEntry = null,
   isOpen,
@@ -197,9 +199,11 @@ export function MobileEntryForm({
 }: {
   existingChallans: string[];
   autocompleteData: { fromParties: string[]; toParties: string[]; destinations: string[] };
-  onSaved: (savedEntry: any, isEdit: boolean) => void;
+  onSaved?: (savedEntry: any, isEdit: boolean) => void;
+  onSaveEntry?: (entryData: any, isEdit: boolean) => void;
   mobileDefaultDate?: string | null;
   activeRegisterId?: string;
+  activeRegister?: { id?: string; month?: number; year?: number; name?: string; status?: string } | null;
   isReadOnly?: boolean;
   editingEntry?: any | null;
   isOpen?: boolean;
@@ -213,19 +217,51 @@ export function MobileEntryForm({
   };
   const [loading, setSaving] = useState(false);
 
-  // Predict the next challan based on the most recent entry
+  const lastSubmittedChallanRef = useRef<number | null>(null);
+  const lastUsedDateRef = useRef<string | null>(null);
+
+  // Predict the next challan based on highest existing challan and last submitted entry
   const getNextChallan = () => {
-    if (!existingChallans || existingChallans.length === 0) return "1001";
-
-    // existingChallans is already sorted by newest first (descending createdAt)
-    const lastCreatedChallan = parseInt(existingChallans[0], 10);
-
-    if (isNaN(lastCreatedChallan) || lastCreatedChallan <= 0) return "1001";
-    return String(lastCreatedChallan + 1);
+    let max = 1000;
+    if (existingChallans && existingChallans.length > 0) {
+      for (const ch of existingChallans) {
+        const num = parseInt(ch, 10);
+        if (!isNaN(num) && num > max) max = num;
+      }
+    }
+    if (lastSubmittedChallanRef.current !== null && lastSubmittedChallanRef.current >= max) {
+      max = lastSubmittedChallanRef.current;
+    }
+    return String(max + 1);
   };
 
+  // Calculate first date of active register's month (e.g. 2026-10-01)
+  const getRegisterFirstDate = () => {
+    if (activeRegister?.month && activeRegister?.year) {
+      const pad = (num: number) => String(num).padStart(2, "0");
+      return `${activeRegister.year}-${pad(activeRegister.month)}-01`;
+    }
+    return new Date().toISOString().split("T")[0];
+  };
+
+  // Get default date: use user-set mobileDefaultDate if available, else register's first date
+  const getDefaultDate = () => {
+    return mobileDefaultDate || getRegisterFirstDate();
+  };
+
+  // Min and Max allowed date range for date picker matching active register month
+  const minMaxDate = useMemo(() => {
+    if (!activeRegister?.month || !activeRegister?.year) return {};
+    const { month, year } = activeRegister;
+    const pad = (num: number) => String(num).padStart(2, "0");
+    const min = `${year}-${pad(month)}-01`;
+    const lastDay = new Date(year, month, 0).getDate();
+    const max = `${year}-${pad(month)}-${pad(lastDay)}`;
+    return { min, max };
+  }, [activeRegister]);
+
   const defaultForm = (): FormData => ({
-    date: mobileDefaultDate || new Date().toISOString().split("T")[0],
+    date: getDefaultDate(),
     challanNo: getNextChallan(),
     fromParty: "",
     toParty: "",
@@ -244,7 +280,7 @@ export function MobileEntryForm({
   useEffect(() => {
     if (open) {
       if (editingEntry) {
-        let dateStr = mobileDefaultDate || new Date().toISOString().split("T")[0];
+        let dateStr = getDefaultDate();
         if (editingEntry.date) {
           try {
             dateStr = new Date(editingEntry.date).toISOString().split("T")[0];
@@ -271,12 +307,12 @@ export function MobileEntryForm({
     }
   }, [open, editingEntry]);
 
-  // Update background form if default date changes while closed
+  // Update background form if default date or active register changes while closed
   useEffect(() => {
     if (!open) {
-      setForm((f) => ({ ...f, date: mobileDefaultDate || new Date().toISOString().split("T")[0] }));
+      setForm((f) => ({ ...f, date: getDefaultDate() }));
     }
-  }, [mobileDefaultDate, open]);
+  }, [mobileDefaultDate, activeRegister, open]);
 
   const set = (key: keyof FormData, val: string) => {
     setForm((f) => {
@@ -339,7 +375,7 @@ export function MobileEntryForm({
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = (addNext: boolean = false) => {
     if (isReadOnly) {
       toast.error("Cannot modify entries in a locked or archived register.");
       return;
@@ -360,58 +396,60 @@ export function MobileEntryForm({
       challanNo: form.challanNo.trim(),
     };
 
-    // Build weight as separate value and unit
     const weightValue = Number(cleaned.weightNum) || 0;
     const weightUnit = cleaned.weightUnit;
+    const isEdit = Boolean(editingEntry && editingEntry.id);
 
-    setSaving(true);
-    try {
-      const isEdit = Boolean(editingEntry && editingEntry.id);
-      const url = isEdit ? `/api/couriers/${editingEntry.id}` : "/api/couriers";
-      const method = isEdit ? "PATCH" : "POST";
+    const payload: any = {
+      date: cleaned.date,
+      challanNo: cleaned.challanNo,
+      fromParty: cleaned.fromParty,
+      toParty: cleaned.toParty,
+      weightValue,
+      weightUnit,
+      destination: cleaned.destination,
+      amount: parseFloat(cleaned.amount) || 0,
+      status: cleaned.status,
+      mode: cleaned.mode,
+      ...(isEdit ? { id: editingEntry.id, srNo: editingEntry.srNo, createdAt: editingEntry.createdAt } : {}),
+    };
 
-      const payload: any = {
-        date: cleaned.date,
-        challanNo: cleaned.challanNo,
-        fromParty: cleaned.fromParty,
-        toParty: cleaned.toParty,
-        weightValue,
-        weightUnit,
-        destination: cleaned.destination,
-        amount: parseFloat(cleaned.amount) || 0,
-        status: cleaned.status,
-        mode: cleaned.mode,
-      };
+    // Track submitted challan and date for next quick-entry
+    const currentChallanNum = parseInt(cleaned.challanNo, 10);
+    if (!isNaN(currentChallanNum)) {
+      lastSubmittedChallanRef.current = currentChallanNum;
+    }
+    lastUsedDateRef.current = cleaned.date;
 
-      if (!isEdit) {
-        payload.registerId = activeRegisterId;
-      }
+    const nextChallan = String((currentChallanNum || 1000) + 1);
 
-      const res = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+    // Dispatch background save to parent without blocking user
+    if (onSaveEntry) {
+      onSaveEntry(payload, isEdit);
+    } else if (onSaved) {
+      onSaved(payload, isEdit);
+    }
+
+    if (isEdit || !addNext) {
+      // Close sheet immediately so user can view list or tap Add Entry
+      setOpen(false);
+      setErrors({});
+      setForm({
+        ...defaultForm(),
+        challanNo: nextChallan,
+        date: getDefaultDate(),
       });
-
-      const resJson = await res.json().catch(() => null);
-
-      if (res.ok && resJson) {
-        const savedData = resJson.data || resJson;
-        toast.success(isEdit ? "Entry updated successfully!" : "Entry saved!");
-        clearAutocompleteCache();
-        setForm(defaultForm());
-        setErrors({});
-        setOpen(false);
-        onSaved(savedData, isEdit);
-      } else {
-        const errorMessage = resJson?.error || (typeof resJson === "string" ? resJson : "Failed to save");
-        toast.error(errorMessage);
-      }
-    } catch (err) {
-      console.error("Save entry error:", err);
-      toast.error("Network error");
-    } finally {
-      setSaving(false);
+    } else {
+      // Save & Next: keep sheet open and reset fields for parallel entry
+      setForm({
+        ...defaultForm(),
+        challanNo: nextChallan,
+        date: getDefaultDate(),
+      });
+      setErrors({});
+      setTimeout(() => {
+        document.getElementById("m-from")?.focus();
+      }, 50);
     }
   };
 
@@ -486,6 +524,8 @@ export function MobileEntryForm({
                     id="m-date"
                     type="date"
                     value={form.date}
+                    min={minMaxDate.min}
+                    max={minMaxDate.max}
                     onChange={(e) => set("date", e.target.value)}
                     onKeyDown={(e) => handleKeyDown(e, "m-challan")}
                     className="h-12 text-base rounded-xl bg-slate-50/50 dark:bg-slate-900/50 focus-visible:ring-2 focus-visible:ring-blue-500/40 transition-all border-slate-200 dark:border-slate-700"
@@ -645,20 +685,36 @@ export function MobileEntryForm({
 
               {/* Footer save button */}
               <div className="px-6 py-4 border-t border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-950">
-                <Button
-                  onClick={handleSave}
-                  disabled={loading}
-                  className="w-full h-14 text-base font-semibold rounded-2xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg shadow-blue-500/25 gap-2"
-                >
-                  <Save className="h-5 w-5" />
-                  {loading
-                    ? editingEntry
-                      ? "Updating..."
-                      : "Saving..."
-                    : editingEntry
-                    ? "Update Entry"
-                    : "Save Entry"}
-                </Button>
+                {editingEntry ? (
+                  <Button
+                    type="button"
+                    onClick={() => handleSave(false)}
+                    className="w-full h-14 text-base font-semibold rounded-2xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg shadow-blue-500/25 gap-2 active:scale-[0.98] transition-all"
+                  >
+                    <Save className="h-5 w-5" />
+                    Update Entry
+                  </Button>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => handleSave(true)}
+                      className="flex-1 h-14 text-sm font-semibold rounded-2xl border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 active:scale-[0.98] transition-all gap-1.5"
+                    >
+                      <Plus className="h-4 w-4" />
+                      Save & Next
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => handleSave(false)}
+                      className="flex-1 h-14 text-sm font-semibold rounded-2xl bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg shadow-blue-500/25 active:scale-[0.98] transition-all gap-1.5"
+                    >
+                      <Save className="h-4 w-4" />
+                      Save Entry
+                    </Button>
+                  </div>
+                )}
               </div>
             </motion.div>
           </>
